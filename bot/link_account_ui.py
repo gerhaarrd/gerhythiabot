@@ -11,31 +11,37 @@ if TYPE_CHECKING:
     from bot.discord_bot import RhythiaBot
 
 PRIVACY_NOTICE = (
-    "**Privacy & data**\n"
+    "This link flow asks you to paste a Rhythia/Supabase session URL or `access_token` "
+    "because Rhythia does not currently provide a redirect that this bot can control.\n\n"
+    "That URL/token is sensitive: while it is valid, anyone who has it may be able to "
+    "access your Rhythia session. Only paste it in this private Discord modal, never in "
+    "a public channel or to another person.\n\n"
     "By linking, you allow this bot to store an encrypted **session token** for your "
-    "Rhythia account (the same one used when you log in on the website) on the server "
-    "where this bot runs.\n\n"
-    "That token is used **only** to run bot commands on your behalf (profile, "
-    "leaderboard, maps, etc.) and can be revoked anytime with `/gerhythia unlink`, which "
-    "deletes the link and token here.\n\n"
+    "Rhythia account on the server where this bot runs. The token is used **only** to "
+    "run bot commands on your behalf and can be revoked anytime with `/gerhythia unlink`."
+)
+
+OPERATOR_NOTICE = (
     "The **bot operator** (server/VPS owner) has technical access to the bot files and "
-    "**could** read that token while it remains valid — as with any community account-link "
+    "**could** read that token while it remains valid - as with any community account-link "
     "bot. This project is **not official** Rhythia / Capo Games.\n\n"
-    "Tokens are not shared with third parties by this code; hosting is the operator’s "
-    "responsibility. If you disagree, **do not** use `/gerhythia link` — commands like "
+    "Tokens are not shared with third parties by this code; hosting is the operator's "
+    "responsibility. If you disagree, **do not** use `/gerhythia link` - commands like "
     "`/gerhythia search` work without linking."
 )
 
 
 def link_instructions_embed() -> discord.Embed:
     description = (
-        "**Step 1** — Click **Log in with Discord** (opens Rhythia's official login).\n\n"
-        "**Step 2** — You will land on a page that **fails to load** — that is expected! "
+        "**Step 1** - Click **Log in with Discord** (opens Rhythia's official login).\n\n"
+        "**Step 2** - You will land on a page that **fails to load** - that is expected! "
         "It means the login worked.\n\n"
-        "**Step 3** — Copy the **full address bar URL** (starts with `http://127.0.0.1` "
+        "**Step 3** - Copy the **full address bar URL** (starts with `http://127.0.0.1` "
         "and contains `access_token`) and click **Paste session here** below.\n\n"
+        "**Important** - This URL is effectively a temporary login token. Do not post it "
+        "in chat, screenshots, logs, or anywhere public.\n\n"
         "Use the **same Discord account** as on this server.\n\n"
-        "_Ephemeral. Delete messages with your URL after linking._"
+        "_This message and the paste form are private to you._"
     )
     embed = discord.Embed(
         title="Link Rhythia account",
@@ -43,8 +49,13 @@ def link_instructions_embed() -> discord.Embed:
         color=discord.Color.blurple(),
     )
     embed.add_field(
-        name="⚠️ Legal notice",
+        name="Privacy notice",
         value=PRIVACY_NOTICE,
+        inline=False,
+    )
+    embed.add_field(
+        name="Operator notice",
+        value=OPERATOR_NOTICE,
         inline=False,
     )
     return embed
@@ -52,9 +63,9 @@ def link_instructions_embed() -> discord.Embed:
 
 class SessionModal(ui.Modal, title="Complete Rhythia link"):
     session = ui.TextInput(
-        label="URL or access_token",
+        label="Private session URL or access_token",
         style=discord.TextStyle.paragraph,
-        placeholder="https://www.rhythia.com/#access_token=eyJ...  (or paste eyJ... only)",
+        placeholder="Paste only here. It contains your temporary Rhythia login token.",
         required=True,
         max_length=4000,
     )
@@ -80,7 +91,8 @@ class SessionModal(ui.Modal, title="Complete Rhythia link"):
             return
         await interaction.followup.send(
             f"**{username}** linked. Use `/gerhythia profile`.\n"
-            "Delete this message — it contains sensitive data.",
+            "Your pasted session URL was processed privately. Use `/gerhythia unlink` "
+            "anytime to delete the stored token from this bot.",
             ephemeral=True,
         )
 

@@ -89,14 +89,13 @@ class RhythiaSlashCommands(commands.Cog):
 
     @rhythia.command(
         name="link",
-        description="Link Rhythia: log in on the website, then paste the session URL here",
+        description="Link Rhythia by privately pasting the session URL from login",
     )
     async def link(self, interaction: discord.Interaction) -> None:
         if interaction.user is None:
             return
 
         login_url = build_login_url()
-        logger.info("/rhythia link (site redirect) %s", login_url[:120])
         await interaction.response.send_message(
             embed=link_instructions_embed(),
             view=LinkView(self.bot, login_url),
