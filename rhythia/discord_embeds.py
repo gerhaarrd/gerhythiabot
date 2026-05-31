@@ -1,0 +1,304 @@
+from __future__ import annotations
+
+from typing import Any
+
+import discord
+
+from rhythia.constants import FEEDBACK_DISCORD_USERNAME
+from rhythia.site_urls import beatmap_page_url, leaderboard_page_url, user_profile_url
+
+beatmap_url = beatmap_page_url
+leaderboard_url = leaderboard_page_url
+user_url = user_profile_url
+
+EMBED_COLOR_PROFILE = 0x8B5CF6    # Vibrant Violet
+EMBED_COLOR_LEADERBOARD = 0xFBBF24 # Amber Gold
+EMBED_COLOR_MAPS = 0x3B82F6        # Bright Blue
+EMBED_COLOR_SEARCH = 0x10B981      # Emerald Green
+EMBED_COLOR_HELP = 0xEC4899        # Neon Pink
+
+
+def flag_emoji(country_code: str | None) -> str:
+    if not country_code or len(country_code) != 2:
+        return "🏳️"
+    return "".join(chr(ord(char) + 127397) for char in country_code.upper())
+
+
+def _num(value: Any, *, decimals: int = 0) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        return f"{value:,.{decimals}f}"
+    return f"{value:,}"
+
+
+def _truncate(text: str, max_len: int) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
+
+
+def _paginated_footer(data: dict[str, Any], *, extra: str = "") -> str:
+    total = int(data.get("total") or 0)
+    page = int(data.get("currentPage") or 1)
+    per_page = int(data.get("viewPerPage") or 0)
+    parts = [f"Page {page}", f"{per_page}/page", f"{total:,} total"]
+    if extra:
+        parts.insert(0, extra)
+    return " · ".join(parts)
+
+
+def help_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Rhythia Bot — Help",
+        description="Community bot for Rhythia stats and search. **Not official.**",
+        color=EMBED_COLOR_HELP,
+    )
+    embed.add_field(
+        name="Account",
+        value=(
+            "`/gerhythia link` — Link via Discord login (needs Rhythia redirect support)\n"
+            "`/gerhythia unlink` — Remove your link and stored token\n"
+            "`/gerhythia account` — Show which account is linked"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Stats & search",
+        value=(
+            "`/gerhythia profile` — Your profile (or another player’s username)\n"
+            "`/gerhythia search` — Search players & beatmaps (no link required)\n"
+            "`/gerhythia leaderboard` — Skill leaderboard (optional country filter)\n"
+            "`/gerhythia maps` — Browse/filter beatmaps\n"
+            "`/gerhythia suggest` — Suggest Ranked maps based on your top plays"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="💬 Feedback",
+        value=(
+            f"Questions, bugs, or suggestions? Contact **{FEEDBACK_DISCORD_USERNAME}** on Discord."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Most commands require /gerhythia link first · Use /gerhythia help anytime")
+    return embed
+
+
+def profile_embed(
+    data: dict[str, Any],
+    *,
+    title_prefix: str = "",
+) -> discord.Embed:
+    user = data.get("user") or {}
+    username = user.get("username") or user.get("computedUsername") or "Unknown"
+    user_id = user.get("id")
+    flag = flag_emoji(user.get("flag"))
+    profile_link = user_url(user_id) if user_id else "https://rhythia.com"
+
+    embed = discord.Embed(
+        title=_truncate(f"{title_prefix}{flag} {username}".strip(), 256),
+        url=profile_link,
+        color=EMBED_COLOR_PROFILE,
+    )
+
+    avatar = user.get("avatar_url") or user.get("profile_image")
+    if avatar:
+        embed.set_thumbnail(url=avatar)
+
+    clan = user.get("clan")
+    clan_text = clan.get("acronym") if isinstance(clan, dict) else "—"
+
+    embed.add_field(
+        name="🏆 Skill",
+        value=f"**{_num(user.get('skill_points'), decimals=2)}** SP",
+        inline=True,
+    )
+    embed.add_field(
+        name="🌀 Spin",
+        value=f"**{_num(user.get('spin_skill_points'), decimals=2)}** SP",
+        inline=True,
+    )
+    embed.add_field(name="🎮 Plays", value=_num(user.get("play_count")), inline=True)
+    embed.add_field(
+        name="🌍 Global",
+        value=f"**#{_num(user.get('position'))}**",
+        inline=True,
+    )
+    embed.add_field(
+        name="📍 Country",
+        value=f"**#{_num(user.get('country_position'))}**",
+        inline=True,
+    )
+    embed.add_field(
+        name="📊 Mu / Sigma",
+        value=f"{user.get('mu_rank', '—')} / {user.get('sigma_rank', '—')}",
+        inline=True,
+    )
+
+    status_parts: list[str] = []
+    if user.get("is_online"):
+        status_parts.append("🟢 Online")
+    else:
+        status_parts.append("⚫ Offline")
+    if user.get("verified"):
+        status_parts.append("✅ Verified")
+    status_parts.append(str(user.get("activity_status") or "—").capitalize())
+    embed.add_field(name="📡 Status", value=" · ".join(status_parts), inline=False)
+
+    if clan_text != "—":
+        embed.add_field(name="Clan", value=clan_text, inline=True)
+
+    embed.set_footer(text=f"ID {user_id} · rhythia.com")
+    return embed
+
+
+def leaderboard_embed(
+    data: dict[str, Any],
+    *,
+    limit: int = 10,
+    country: str | None = None,
+    spin: bool = False,
+) -> discord.Embed:
+    entries = data.get("leaderboard") or []
+    page = int(data.get("currentPage") or 1)
+    per_page = int(data.get("viewPerPage") or 50)
+    start_rank = (page - 1) * per_page
+
+    filter_bits: list[str] = []
+    if country:
+        filter_bits.append(f"{flag_emoji(country)} {country.upper()}")
+    else:
+        filter_bits.append("🌍 Global")
+    if spin:
+        filter_bits.append("Spin")
+
+    lines: list[str] = []
+    for index, entry in enumerate(entries[:limit], start=1):
+        rank = start_rank + index
+        flag = flag_emoji(entry.get("flag"))
+        username = entry.get("username", "?")
+        user_id = entry.get("id")
+        name = (
+            f"[{username}]({user_url(user_id)})"
+            if user_id
+            else f"**{username}**"
+        )
+        skill = _num(entry.get("skill_points"), decimals=1)
+        clans = entry.get("clans")
+        clan = f" `{clans['acronym']}`" if isinstance(clans, dict) else ""
+        if rank == 1:
+            rank_str = "🥇"
+        elif rank == 2:
+            rank_str = "🥈"
+        elif rank == 3:
+            rank_str = "🥉"
+        else:
+            rank_str = f"`#{rank:>3}`"
+
+        lines.append(f"{rank_str} {flag} {name} — **{skill}** SP{clan}")
+
+    title = "🏆 Rhythia Leaderboard"
+    if country:
+        title += f" · {country.upper()}"
+
+    embed = discord.Embed(
+        title=title,
+        url=leaderboard_url(country=country),
+        description="\n".join(lines) if lines else "_No players on this page._",
+        color=EMBED_COLOR_LEADERBOARD,
+    )
+
+    position = data.get("userPosition")
+    if position is not None:
+        embed.add_field(name="Your rank", value=f"**#{int(position):,}**", inline=False)
+
+    embed.set_footer(text=_paginated_footer(data, extra=" · ".join(filter_bits)))
+    return embed
+
+
+def beatmaps_embed(
+    data: dict[str, Any],
+    *,
+    limit: int = 10,
+    filters_label: str = "",
+) -> discord.Embed:
+    beatmaps = data.get("beatmaps") or []
+
+    lines: list[str] = []
+    for bm in beatmaps[:limit]:
+        bm_id = bm.get("id", "?")
+        stars = bm.get("starRating")
+        stars_text = f"{stars:.2f}★" if isinstance(stars, (int, float)) else "—"
+        title = _truncate(bm.get("title") or "?", 55)
+        mapper = bm.get("ownerUsername", "?")
+        status = bm.get("status", "—")
+        link = beatmap_url(bm_id)
+        owner_id = bm.get("owner")
+        if owner_id:
+            mapper_part = f"[**{mapper}**]({user_url(owner_id)})"
+        else:
+            mapper_part = f"**{mapper}**"
+        
+        lines.append(
+            f"**[{title}]({link})**\n"
+            f"> 🎫 `#{bm_id}`  |  ⭐ **{stars_text}**  |  🏷️ **{status}**  |  👤 {mapper_part}"
+        )
+
+    embed = discord.Embed(
+        title="🎵 Beatmaps",
+        url="https://rhythia.com/maps",
+        description="\n\n".join(lines) if lines else "_No maps found._",
+        color=EMBED_COLOR_MAPS,
+    )
+    if filters_label:
+        embed.set_footer(text=_paginated_footer(data, extra=filters_label))
+    else:
+        embed.set_footer(text=_paginated_footer(data))
+    return embed
+
+
+def search_results_embed(
+    data: dict[str, Any],
+    *,
+    query: str,
+    limit_users: int = 8,
+    limit_maps: int = 5,
+) -> discord.Embed:
+    users = data.get("users") or []
+    maps = data.get("beatmaps") or []
+
+    parts: list[str] = []
+
+    if users:
+        parts.append("**Players**")
+        for u in users[:limit_users]:
+            uid = u.get("id")
+            name = u.get("username", "?")
+            flag = flag_emoji(u.get("flag"))
+            link = user_url(uid) if uid else "https://rhythia.com"
+            parts.append(f"> {flag} [{name}]({link})  |  `ID {uid}`")
+
+    if maps:
+        parts.append("\n🎵 **Beatmaps**")
+        for bm in maps[:limit_maps]:
+            bm_id = bm.get("id")
+            title = _truncate(bm.get("title") or "?", 50)
+            stars = bm.get("starRating")
+            stars_text = f"⭐ **{stars:.2f}★**" if isinstance(stars, (int, float)) else ""
+            link = beatmap_url(bm_id) if bm_id else "https://rhythia.com/maps"
+            parts.append(f"> [{title}]({link})  |  {stars_text}  |  `#{bm_id}`")
+
+    if not parts:
+        description = f"No results for **{query}**."
+    else:
+        description = "\n".join(parts)
+
+    embed = discord.Embed(
+        title=f"Search: {query}",
+        description=_truncate(description, 4000),
+        color=EMBED_COLOR_SEARCH,
+        url="https://rhythia.com",
+    )
+    embed.set_footer(text="Use /gerhythia profile username:… for full stats")
+    return embed

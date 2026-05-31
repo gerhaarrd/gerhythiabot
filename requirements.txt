@@ -1,0 +1,4 @@
+discord.py>=2.4
+requests>=2.32
+cryptography>=44.0
+python-dotenv>=1.0

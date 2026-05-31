@@ -1,0 +1,53 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.*
+
+# Database files
+*.db
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Project configs
+vertracloud.config
+
+# Data folders
+data/
+
+# Logs
+*.log
+
+# IDEs / Editors
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checkers
+.mypy_cache/
+.pyre/
+
+# Jupyter
+.ipynb_checkpoints/
