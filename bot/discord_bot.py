@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -21,6 +22,7 @@ class RhythiaBot(commands.Bot):
         deleted = self.linked_accounts.cleanup_expired_tokens()
         if deleted:
             logger.info("Removed %d expired linked account(s)", deleted)
+        self._presence_task: asyncio.Task[None] | None = None
 
     def client_for(self, discord_id: int) -> RhythiaClient:
         return RhythiaClient(self.linked_accounts.get_session_token(discord_id))
@@ -29,6 +31,7 @@ class RhythiaBot(commands.Bot):
         from bot.slash_commands import RhythiaSlashCommands
 
         await self.add_cog(RhythiaSlashCommands(self))
+        self._start_presence_task()
 
         if not self.settings.sync_commands:
             logger.info("Command sync skipped (SKIP_COMMAND_SYNC=1)")
@@ -44,3 +47,46 @@ class RhythiaBot(commands.Bot):
         else:
             await self.tree.sync()
             logger.info("Commands synced globally")
+
+    async def close(self) -> None:
+        if self._presence_task:
+            self._presence_task.cancel()
+        await super().close()
+
+    def _start_presence_task(self) -> None:
+        if self._presence_task and not self._presence_task.done():
+            return
+        self._presence_task = asyncio.create_task(
+            self._rotate_presence(),
+            name="rhythia-presence",
+        )
+
+    async def _rotate_presence(self) -> None:
+        await self.wait_until_ready()
+
+        messages = self._presence_messages()
+        index = 0
+
+        while not self.is_closed():
+            message = messages[index % len(messages)]
+            index += 1
+            try:
+                await self.change_presence(
+                    activity=discord.Activity(
+                        type=discord.ActivityType.watching,
+                        name=message,
+                    )
+                )
+            except discord.DiscordException as exc:
+                logger.warning("Could not update Discord presence: %s", exc)
+            await asyncio.sleep(60)
+
+    @staticmethod
+    def _presence_messages() -> list[str]:
+        return [
+            "/gerhythia help",
+            "/gerhythia search",
+            "/gerhythia maps",
+            "Rhythia profiles",
+            "Rhythia beatmaps",
+        ]
