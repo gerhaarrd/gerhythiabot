@@ -123,6 +123,7 @@ def help_embed() -> discord.Embed:
         ),
         inline=False,
     )
+    embed.set_thumbnail(url="attachment://icon.jpg")
     embed.set_footer(text="Linking stores only public Rhythia profile info · Use /gerhythia help anytime")
     return embed
 

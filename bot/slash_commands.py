@@ -96,7 +96,8 @@ class RhythiaSlashCommands(commands.Cog):
 
     @rhythia.command(name="help", description="Command list and feedback contact")
     async def help_command(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(embed=help_embed())
+        icon_file = discord.File("assets/icon.jpg", filename="icon.jpg")
+        await interaction.response.send_message(embed=help_embed(), file=icon_file)
 
     @rhythia.command(
         name="link",
