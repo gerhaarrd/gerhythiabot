@@ -255,10 +255,16 @@ def leaderboard_embed(
     )
 
     # Use provided user_position, fall back to data.get("userPosition")
-    position = user_position if user_position is not None else data.get("userPosition")
-    # Show user's rank if available (0 or None means not on leaderboard)
-    if position:  # 0 is falsy, None is falsy, so this skips both
-        embed.add_field(name="Your rank", value=f"**#{int(position):,}**", inline=False)
+    raw_position = user_position if user_position is not None else data.get("userPosition")
+    # Convert to int when possible and only show if > 0
+    if raw_position is not None:
+        try:
+            pos_int = int(raw_position)
+            if pos_int > 0:
+                embed.add_field(name="Your rank", value=f"**#{pos_int:,}**", inline=False)
+        except (TypeError, ValueError):
+            # If position isn't an int, skip showing it
+            pass
 
     embed.set_footer(text=_paginated_footer(data, extra=" · ".join(filter_bits)))
     return embed

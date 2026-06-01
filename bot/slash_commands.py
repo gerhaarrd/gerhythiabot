@@ -291,6 +291,13 @@ class RhythiaSlashCommands(commands.Cog):
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+        # Defer early to avoid interaction timeout / double-ack errors
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(thinking=True)
+            except discord.NotFound:
+                logger.warning("Interaction expired (discord=%s)", interaction.user.id)
+                return
 
         # Get user's rank from linked account if available
         user_position: int | None = None
@@ -302,10 +309,15 @@ class RhythiaSlashCommands(commands.Cog):
                     profile = client.get_profile(user_id=linked.rhythia_user_id)
                     user_data = profile.get("user", {})
                     # Use global position for global leaderboard, country_position for country leaderboard
-                    if country_code:
-                        user_position = user_data.get("country_position")
-                    else:
-                        user_position = user_data.get("position")
+                    raw_pos = user_data.get("country_position") if country_code else user_data.get("position")
+                    if raw_pos is not None:
+                        try:
+                            pos_int = int(raw_pos)
+                            if pos_int > 0:
+                                user_position = pos_int
+                        except (TypeError, ValueError):
+                            # ignore non-integer positions
+                            pass
             except RhythiaAPIError:
                 # If we can't fetch position, just show leaderboard without user position
                 pass
