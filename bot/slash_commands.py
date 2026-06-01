@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.discord_bot import RhythiaBot
+from bot.embed_navigator import EmbedNavigatorView
 from bot.link_account_ui import PublicLinkConfirmView, link_confirmation_embed
 from rhythia.account_link import (
     AccountLinkError,
@@ -288,14 +289,15 @@ class RhythiaSlashCommands(commands.Cog):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
 
-        await self._reply_with_embed(
+        await self._reply_with_navigable_embed(
             interaction,
-            fetch=lambda c: c.get_leaderboard(
-                page=page, country=country_code, spin=spin
+            fetch=lambda c, p: c.get_leaderboard(
+                page=p, country=country_code, spin=spin
             ),
             build=lambda d: leaderboard_embed(
                 d, limit=limit, country=country_code, spin=spin
             ),
+            initial_page=page,
         )
 
     @rhythia.command(name="maps", description="Browse and filter beatmaps")
@@ -344,10 +346,10 @@ class RhythiaSlashCommands(commands.Cog):
             max_stars=max_stars,
         )
 
-        await self._reply_with_embed(
+        await self._reply_with_navigable_embed(
             interaction,
-            fetch=lambda c: c.get_beatmaps(
-                page=page,
+            fetch=lambda c, p: c.get_beatmaps(
+                page=p,
                 query=query,
                 author=author,
                 status=status_val,
@@ -355,6 +357,7 @@ class RhythiaSlashCommands(commands.Cog):
                 max_stars=max_stars,
             ),
             build=lambda d: beatmaps_embed(d, limit=limit, filters_label=label),
+            initial_page=page,
         )
 
     @rhythia.command(name="beatmap", description="Show one beatmap by id or title")
@@ -526,6 +529,47 @@ class RhythiaSlashCommands(commands.Cog):
             with client:
                 data = fetch(client)
             await interaction.followup.send(embed=build(data))
+        except RhythiaAPIError as exc:
+            logger.warning("API (discord=%s): %s", interaction.user.id, exc)
+            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+        except Exception:
+            logger.exception("Error in command %s", interaction.command)
+            await interaction.followup.send("Internal error.", ephemeral=True)
+
+    async def _reply_with_navigable_embed(
+        self,
+        interaction: discord.Interaction,
+        *,
+        fetch: Callable[[RhythiaClient, int], dict[str, Any]],
+        build: Callable[[dict[str, Any]], discord.Embed],
+        initial_page: int = 1,
+    ) -> None:
+        """Reply with an embed that has navigation buttons."""
+        if interaction.user is None:
+            return
+
+        client = self.bot.client_for()
+
+        await interaction.response.defer(thinking=True)
+        try:
+            with client:
+                data = fetch(client, initial_page)
+
+            # Calculate max pages from response data
+            total = data.get("total", 0)
+            per_page = data.get("viewPerPage", 50)
+            max_pages = (total + per_page - 1) // per_page if total > 0 else 1
+
+            embed = build(data)
+            view = EmbedNavigatorView(
+                interaction,
+                fetch=fetch,
+                build=build,
+                initial_data=data,
+                initial_page=initial_page,
+                max_pages=max_pages,
+            )
+            await interaction.followup.send(embed=embed, view=view)
         except RhythiaAPIError as exc:
             logger.warning("API (discord=%s): %s", interaction.user.id, exc)
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
