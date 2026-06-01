@@ -1,13 +1,14 @@
-"""Shared Rhythia account linking (OAuth callback and manual token)."""
+"""Shared Rhythia public account linking."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from urllib.parse import parse_qs
+import secrets
+import string
+from typing import Any, TYPE_CHECKING
 
-from rhythia.api_client import RhythiaClient
+from rhythia.api_client import RhythiaClient, public_search
 from rhythia.api_errors import RhythiaAPIError
-from rhythia.oauth_login import discord_user_id_from_session_jwt
+from rhythia.linked_accounts import PendingLink
 
 if TYPE_CHECKING:
     from bot.discord_bot import RhythiaBot
@@ -17,65 +18,79 @@ class AccountLinkError(Exception):
     pass
 
 
-def extract_access_token_from_paste(raw: str) -> str:
-    """From JWT alone, Supabase LocalStorage JSON object, or full rhythia.com URL with #access_token=..."""
-    text = raw.strip()
-    if not text:
-        raise AccountLinkError("Paste your access_token or the full URL from the address bar.")
+CODE_PREFIX = "GERHYTHIA"
+CODE_ALPHABET = string.ascii_uppercase + string.digits
+
+
+def find_link_candidates(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    text = query.strip()
+    if len(text) < 2:
+        raise AccountLinkError("Type at least 2 characters from your Rhythia username.")
 
     try:
-        import json
-        data = json.loads(text)
-        if isinstance(data, dict) and "access_token" in data:
-            return str(data["access_token"])
-    except Exception:
-        pass
+        results = public_search(query=text, limit=limit)
+    except RhythiaAPIError as exc:
+        raise AccountLinkError(f"Rhythia search failed: {exc}") from exc
 
-    if "#" in text:
-        text = text.split("#", 1)[1]
-
-    if "access_token=" in text:
-        params = parse_qs(text, keep_blank_values=False)
-        token = (params.get("access_token") or [None])[0]
-        if token:
-            return str(token)
-
-    if text.count(".") >= 2:
-        return text
-
-    raise AccountLinkError(
-        "Could not find access_token. After logging in on rhythia.com, copy the full URL "
-        "or the long token that starts with eyJ... (or copy the Local Storage auth token)"
-    )
+    users = results.get("users") or []
+    if not isinstance(users, list):
+        raise AccountLinkError("Rhythia returned an unexpected search response.")
+    return [user for user in users if isinstance(user, dict)]
 
 
-def save_rhythia_link(
+def create_pending_rhythia_link(
     bot: RhythiaBot,
     *,
     discord_id: int,
-    access_token: str,
-) -> str:
-    jwt_discord_id = discord_user_id_from_session_jwt(access_token)
-    if jwt_discord_id != str(discord_id):
+    user: dict[str, Any],
+) -> PendingLink:
+    user_id = user.get("id")
+    username = user.get("username") or user.get("computedUsername")
+    if user_id is None or not username:
+        raise AccountLinkError("Rhythia returned a player without an id or username.")
+
+    code = _verification_code()
+    return bot.linked_accounts.save_pending(
+        discord_id,
+        rhythia_user_id=int(user_id),
+        rhythia_username=str(username),
+        code=code,
+    )
+
+
+def verify_pending_rhythia_link(bot: RhythiaBot, *, discord_id: int) -> str:
+    pending = bot.linked_accounts.get_pending(discord_id)
+    if pending is None:
         raise AccountLinkError(
-            "This Rhythia session belongs to a different Discord account. "
-            "Log in with the same Discord account you use on this server."
+            "No pending verification. Use `/gerhythia link <username>` first."
         )
 
     try:
-        with RhythiaClient(access_token) as client:
-            data = client.get_profile()
+        with RhythiaClient() as client:
+            data = client.get_profile(user_id=pending.rhythia_user_id)
     except RhythiaAPIError as exc:
-        raise AccountLinkError(f"Rhythia API error: {exc}") from exc
+        raise AccountLinkError(f"Rhythia profile lookup failed: {exc}") from exc
 
     user = data.get("user") or {}
-    username = user.get("username") or user.get("computedUsername") or "?"
-    user_id = user.get("id")
+    about_me = str(user.get("about_me") or "")
+    if pending.code not in about_me:
+        raise AccountLinkError(
+            f"I couldn't find `{pending.code}` in **{pending.rhythia_username}**'s about me yet. "
+            "Add the code to your Rhythia profile and try `/gerhythia verify` again."
+        )
 
+    username = str(
+        user.get("username") or user.get("computedUsername") or pending.rhythia_username
+    )
     bot.linked_accounts.save(
         discord_id,
-        session_token=access_token,
-        rhythia_user_id=int(user_id) if user_id is not None else None,
-        rhythia_username=str(username),
+        rhythia_user_id=pending.rhythia_user_id,
+        rhythia_username=username,
     )
-    return str(username)
+    bot.linked_accounts.delete_pending(discord_id)
+    return username
+
+
+def _verification_code() -> str:
+    suffix = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
+    return f"{CODE_PREFIX}-{suffix}"

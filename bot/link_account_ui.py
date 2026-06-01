@@ -1,121 +1,95 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import discord
 from discord import ui
 
-from rhythia.account_link import AccountLinkError, extract_access_token_from_paste, save_rhythia_link
+from rhythia.account_link import AccountLinkError, create_pending_rhythia_link
+from rhythia.discord_embeds import flag_emoji, user_url
 
 if TYPE_CHECKING:
     from bot.discord_bot import RhythiaBot
 
-PRIVACY_NOTICE = (
-    "This link flow asks you to paste a Rhythia/Supabase session URL or `access_token` "
-    "because Rhythia does not currently provide a redirect that this bot can control.\n\n"
-    "That URL/token is sensitive: while it is valid, anyone who has it may be able to "
-    "access your Rhythia session. Only paste it in this private Discord modal, never in "
-    "a public channel or to another person.\n\n"
-    "By linking, you allow this bot to store an encrypted **session token** for your "
-    "Rhythia account on the server where this bot runs. The token is used **only** to "
-    "run bot commands on your behalf and can be revoked anytime with `/gerhythia unlink`."
-)
 
-OPERATOR_NOTICE = (
-    "The **bot operator** (server/VPS owner) has technical access to the bot files and "
-    "**could** read that token while it remains valid - as with any community account-link "
-    "bot. This project is **not official** Rhythia / Capo Games.\n\n"
-    "Tokens are not shared with third parties by this code; hosting is the operator's "
-    "responsibility. If you disagree, **do not** use `/gerhythia link` - commands like "
-    "`/gerhythia search` work without linking."
-)
-
-
-def link_instructions_embed() -> discord.Embed:
-    description = (
-        "**Step 1** - Click **Log in with Discord** (opens Rhythia's official login).\n\n"
-        "**Step 2** - You will land on a page that **fails to load** - that is expected! "
-        "It means the login worked.\n\n"
-        "**Step 3** - Copy the **full address bar URL** (starts with `http://127.0.0.1` "
-        "and contains `access_token`) and click **Paste session here** below.\n\n"
-        "**Important** - This URL is effectively a temporary login token. Do not post it "
-        "in chat, screenshots, logs, or anywhere public.\n\n"
-        "Use the **same Discord account** as on this server.\n\n"
-        "_This message and the paste form are private to you._"
-    )
+def link_confirmation_embed(user: dict[str, Any]) -> discord.Embed:
+    username = user.get("username") or user.get("computedUsername") or "Unknown"
+    user_id = user.get("id")
+    flag = flag_emoji(user.get("flag"))
     embed = discord.Embed(
-        title="Link Rhythia account",
-        description=description,
+        title=f"Verify {flag} {username}?",
+        description=(
+            "To prove this profile is yours, confirm below and I will generate a code "
+            "for you to place in your Rhythia about me."
+        ),
+        url=user_url(user_id) if user_id else None,
         color=discord.Color.blurple(),
     )
-    embed.add_field(
-        name="Privacy notice",
-        value=PRIVACY_NOTICE,
-        inline=False,
-    )
-    embed.add_field(
-        name="Operator notice",
-        value=OPERATOR_NOTICE,
-        inline=False,
-    )
+    avatar = user.get("avatar_url") or user.get("profile_image")
+    if avatar:
+        embed.set_thumbnail(url=avatar)
+    embed.add_field(name="Rhythia ID", value=f"`{user_id}`", inline=True)
+    embed.add_field(name="Username", value=f"**{username}**", inline=True)
+    embed.set_footer(text="No access token or private session is stored.")
     return embed
 
 
-class SessionModal(ui.Modal, title="Complete Rhythia link"):
-    session = ui.TextInput(
-        label="Private session URL or access_token",
-        style=discord.TextStyle.paragraph,
-        placeholder="Paste only here. It contains your temporary Rhythia login token.",
-        required=True,
-        max_length=4000,
-    )
-
-    def __init__(self, bot: RhythiaBot) -> None:
-        super().__init__()
+class PublicLinkConfirmView(ui.View):
+    def __init__(self, bot: RhythiaBot, discord_id: int, user: dict[str, Any]) -> None:
+        super().__init__(timeout=300)
         self.bot = bot
+        self.discord_id = discord_id
+        self.user = user
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        if interaction.user is None:
-            return
-        await interaction.response.defer(ephemeral=True)
-        raw = self.session.value or ""
-        try:
-            access_token = extract_access_token_from_paste(raw)
-            username = save_rhythia_link(
-                self.bot,
-                discord_id=interaction.user.id,
-                access_token=access_token,
-            )
-        except AccountLinkError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
-        await interaction.followup.send(
-            f"**{username}** linked. Use `/gerhythia profile`.\n"
-            "Your pasted session URL was processed privately. Use `/gerhythia unlink` "
-            "anytime to delete the stored token from this bot.",
-            ephemeral=True,
-        )
-
-
-class LinkView(ui.View):
-    def __init__(self, bot: RhythiaBot, login_url: str) -> None:
-        super().__init__(timeout=900)
-        self.bot = bot
-        self.add_item(
-            ui.Button(
-                label="1. Log in with Discord",
-                style=discord.ButtonStyle.link,
-                url=login_url,
-                emoji="🔗",
-            )
-        )
-
-    @ui.button(
-        label="2. Paste session here",
-        style=discord.ButtonStyle.primary,
-        emoji="📋",
-    )
-    async def paste_session(
+    @ui.button(label="Confirm link", style=discord.ButtonStyle.primary)
+    async def confirm(
         self, interaction: discord.Interaction, button: ui.Button
     ) -> None:
-        await interaction.response.send_modal(SessionModal(self.bot))
+        if interaction.user is None or interaction.user.id != self.discord_id:
+            await interaction.response.send_message(
+                "Only the user who started this link can confirm it.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            pending = create_pending_rhythia_link(
+                self.bot,
+                discord_id=interaction.user.id,
+                user=self.user,
+            )
+        except AccountLinkError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content=(
+                f"Verification started for **{pending.rhythia_username}**.\n\n"
+                "Add this code to your Rhythia **about me**:\n"
+                f"`{pending.code}`\n\n"
+                "Then run `/gerhythia verify`. This code expires in 15 minutes."
+            ),
+            embed=None,
+            view=self,
+        )
+
+    @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(
+        self, interaction: discord.Interaction, button: ui.Button
+    ) -> None:
+        if interaction.user is None or interaction.user.id != self.discord_id:
+            await interaction.response.send_message(
+                "Only the user who started this link can cancel it.",
+                ephemeral=True,
+            )
+            return
+
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="Link cancelled.",
+            embed=None,
+            view=self,
+        )

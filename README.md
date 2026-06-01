@@ -2,7 +2,7 @@
 
 Gerhythia is a Discord bot for browsing Rhythia data from Discord. It exposes a `/gerhythia` slash-command group for player search, profiles, leaderboards, beatmaps, and map suggestions.
 
-The bot can run public searches without a linked account. Commands that call authenticated Rhythia endpoints require users to link their Rhythia account through Discord login and a private Discord modal.
+The bot uses Rhythia's public API surface and does not store Rhythia access tokens. Users can optionally link a Discord account to a public Rhythia profile by proving they can edit that profile's `about_me`, so commands like `/gerhythia profile` and `/gerhythia suggest` know which player to use by default.
 
 ## Features
 
@@ -10,10 +10,11 @@ The bot can run public searches without a linked account. Commands that call aut
 - `/gerhythia profile` shows your linked profile or another player's profile.
 - `/gerhythia leaderboard` shows global, country, or spin skill leaderboards.
 - `/gerhythia maps` browses beatmaps with title, mapper, status, star rating, page, and limit filters.
+- `/gerhythia beatmap` shows a specific beatmap by id or title, including cover art and details.
+- `/gerhythia recent` shows the latest public score for your linked profile or another player.
 - `/gerhythia suggest` suggests Ranked maps based on a user's top scores.
-- `/gerhythia link`, `/gerhythia unlink`, and `/gerhythia account` manage the Discord-to-Rhythia link.
-- Linked session tokens are stored in SQLite and encrypted with Fernet.
-- Expired Rhythia session tokens are cleaned up automatically.
+- `/gerhythia link`, `/gerhythia verify`, `/gerhythia unlink`, and `/gerhythia account` manage the Discord-to-Rhythia link.
+- Links store only the public Rhythia user id and username.
 
 ## Requirements
 
@@ -58,16 +59,6 @@ DISCORD_GUILD_ID=your_test_server_id
 # Disable command sync on startup.
 SKIP_COMMAND_SYNC=1
 
-# Encrypt linked users' Rhythia session tokens.
-# If omitted, the bot creates data/.link_key automatically.
-TOKEN_ENCRYPTION_KEY=
-
-```
-
-To generate a stable encryption key:
-
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 ## Running
@@ -88,16 +79,17 @@ On startup, the bot registers the `/gerhythia` slash commands and rotates its Di
 
 ## Account Linking
 
-Rhythia does not currently provide a redirect URL controlled by this bot, so linking uses a private paste flow:
+Linking uses public profile search plus an `about_me` verification code:
 
-1. The user runs `/gerhythia link`.
-2. The bot sends an ephemeral message with a Rhythia Discord login button.
-3. After login, the browser lands on a localhost callback URL that is expected to fail loading.
-4. The user copies the full address-bar URL containing `access_token`.
-5. The user pastes that URL into the private Discord modal.
-6. The bot verifies that the Rhythia session belongs to the same Discord account, fetches the profile, and stores the encrypted session token.
+1. The user runs `/gerhythia link <username>`.
+2. The bot searches Rhythia for that public username.
+3. The user confirms the matched profile in an ephemeral message.
+4. The bot generates a short code, such as `GERHYTHIA-AB12CD34`.
+5. The user temporarily adds that code to their Rhythia `about_me`.
+6. The user runs `/gerhythia verify`.
+7. The bot reads the public profile, confirms the code, and stores only `discord_id`, `rhythia_user_id`, `rhythia_username`, and `linked_at`.
 
-Users can delete their stored token at any time with:
+Users can delete their stored link at any time with:
 
 ```text
 /gerhythia unlink
@@ -105,11 +97,9 @@ Users can delete their stored token at any time with:
 
 ## Security Notes
 
-Rhythia session URLs and `access_token` values are sensitive. While valid, they may allow access to a user's Rhythia session. The bot warns users to paste them only into the private Discord modal.
+Profile links are verified by checking for a temporary code in public profile text. This project is not an official Rhythia or Capo Games bot.
 
-Tokens are encrypted before being saved to `data/links.db`, but the server operator still controls the machine, bot files, environment variables, and encryption key. This project is not an official Rhythia or Capo Games bot.
-
-The code does not intentionally share stored tokens with third parties. Hosting, access control, backups, logs, and server security are the operator's responsibility.
+Hosting, access control, backups, logs, and server security are the operator's responsibility.
 
 ## Project Structure
 
@@ -117,18 +107,17 @@ The code does not intentionally share stored tokens with third parties. Hosting,
 bot/
   discord_bot.py       Discord bot setup, command sync, and rotating presence
   slash_commands.py    /gerhythia command implementations
-  link_account_ui.py   Ephemeral account-link embed, buttons, and modal
+  link_account_ui.py   Ephemeral public account-link confirmation UI
 
 rhythia/
   api_client.py        Rhythia API client and public search helper
-  account_link.py      Session URL parsing and link verification
-  linked_accounts.py   SQLite storage for encrypted linked accounts
-  oauth_login.py       Rhythia/Supabase login URL and JWT helpers
+  account_link.py      Public profile search and ownership verification
+  linked_accounts.py   SQLite storage for linked public accounts
   discord_embeds.py    Discord embed builders
   config.py            Environment and path configuration
 
 main.py                Bot entry point
-data/                  Runtime database and generated encryption key
+data/                  Runtime database
 ```
 
 ## Notes

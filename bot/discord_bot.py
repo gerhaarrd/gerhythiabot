@@ -19,13 +19,13 @@ class RhythiaBot(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.settings = settings
         self.linked_accounts = LinkedAccountStore()
-        deleted = self.linked_accounts.cleanup_expired_tokens()
+        deleted = self.linked_accounts.cleanup_expired_pending()
         if deleted:
-            logger.info("Removed %d expired linked account(s)", deleted)
+            logger.info("Removed %d expired pending link(s)", deleted)
         self._presence_task: asyncio.Task[None] | None = None
 
-    def client_for(self, discord_id: int) -> RhythiaClient:
-        return RhythiaClient(self.linked_accounts.get_session_token(discord_id))
+    def client_for(self, discord_id: int | None = None) -> RhythiaClient:
+        return RhythiaClient()
 
     async def setup_hook(self) -> None:
         from bot.slash_commands import RhythiaSlashCommands

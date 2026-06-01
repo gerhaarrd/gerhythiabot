@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import discord
 
@@ -16,6 +18,7 @@ EMBED_COLOR_LEADERBOARD = 0xFBBF24 # Amber Gold
 EMBED_COLOR_MAPS = 0x3B82F6        # Bright Blue
 EMBED_COLOR_SEARCH = 0x10B981      # Emerald Green
 EMBED_COLOR_HELP = 0xEC4899        # Neon Pink
+EMBED_COLOR_SCORE = 0xF97316       # Orange
 
 
 def flag_emoji(country_code: str | None) -> str:
@@ -38,6 +41,42 @@ def _truncate(text: str, max_len: int) -> str:
     return text[: max_len - 1] + "…"
 
 
+def _duration_ms(value: Any) -> str:
+    if not isinstance(value, (int, float)) or value <= 0:
+        return "—"
+    total_seconds = int(value / 1000)
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}:{seconds:02d}"
+
+
+def _score_time(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        return "—"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value[:19].replace("T", " ")
+    return parsed.strftime("%m/%d/%Y %H:%M UTC")
+
+
+def _asset_url(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return None
+    path = quote(parts.path, safe="/%")
+    query = quote(parts.query, safe="=&?/:+,%")
+    fragment = quote(parts.fragment, safe="")
+    return urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
+
+
 def _paginated_footer(data: dict[str, Any], *, extra: str = "") -> str:
     total = int(data.get("total") or 0)
     page = int(data.get("currentPage") or 1)
@@ -57,8 +96,9 @@ def help_embed() -> discord.Embed:
     embed.add_field(
         name="Account",
         value=(
-            "`/gerhythia link` — Link via Discord login (needs Rhythia redirect support)\n"
-            "`/gerhythia unlink` — Remove your link and stored token\n"
+            "`/gerhythia link` — Start profile ownership verification\n"
+            "`/gerhythia verify` — Finish linking after adding the code to your profile\n"
+            "`/gerhythia unlink` — Remove your link\n"
             "`/gerhythia account` — Show which account is linked"
         ),
         inline=False,
@@ -70,6 +110,8 @@ def help_embed() -> discord.Embed:
             "`/gerhythia search` — Search players & beatmaps (no link required)\n"
             "`/gerhythia leaderboard` — Skill leaderboard (optional country filter)\n"
             "`/gerhythia maps` — Browse/filter beatmaps\n"
+            "`/gerhythia beatmap` — Show one beatmap by id or title\n"
+            "`/gerhythia recent` — Show a player's latest public score\n"
             "`/gerhythia suggest` — Suggest Ranked maps based on your top plays"
         ),
         inline=False,
@@ -81,7 +123,7 @@ def help_embed() -> discord.Embed:
         ),
         inline=False,
     )
-    embed.set_footer(text="Most commands require /gerhythia link first · Use /gerhythia help anytime")
+    embed.set_footer(text="Linking stores only public Rhythia profile info · Use /gerhythia help anytime")
     return embed
 
 
@@ -103,8 +145,9 @@ def profile_embed(
     )
 
     avatar = user.get("avatar_url") or user.get("profile_image")
-    if avatar:
-        embed.set_thumbnail(url=avatar)
+    avatar_url = _asset_url(avatar)
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
 
     clan = user.get("clan")
     clan_text = clan.get("acronym") if isinstance(clan, dict) else "—"
@@ -255,6 +298,99 @@ def beatmaps_embed(
         embed.set_footer(text=_paginated_footer(data, extra=filters_label))
     else:
         embed.set_footer(text=_paginated_footer(data))
+    return embed
+
+
+def beatmap_embed(beatmap: dict[str, Any]) -> discord.Embed:
+    bm_id = beatmap.get("id")
+    title = beatmap.get("title") or "Unknown beatmap"
+    mapper = beatmap.get("ownerUsername") or "Unknown mapper"
+    owner_id = beatmap.get("owner")
+    stars = beatmap.get("starRating")
+    stars_text = f"{stars:.2f}★" if isinstance(stars, (int, float)) else "—"
+    status = beatmap.get("status") or "—"
+    length = _duration_ms(beatmap.get("length"))
+    playcount = _num(beatmap.get("playcount"))
+    map_url = beatmap_url(bm_id) if bm_id else "https://rhythia.com/maps"
+
+    embed = discord.Embed(
+        title=_truncate(title, 256),
+        url=map_url,
+        color=EMBED_COLOR_MAPS,
+    )
+    image = _asset_url(beatmap.get("image"))
+    if image:
+        embed.set_image(url=image)
+    owner_avatar = _asset_url(beatmap.get("ownerAvatar"))
+    if owner_avatar:
+        embed.set_thumbnail(url=owner_avatar)
+
+    mapper_text = (
+        f"[{mapper}]({user_url(owner_id)})" if owner_id else mapper
+    )
+    embed.add_field(name="Mapper", value=mapper_text, inline=True)
+    embed.add_field(name="Stars", value=f"**{stars_text}**", inline=True)
+    embed.add_field(name="Status", value=f"**{status}**", inline=True)
+    embed.add_field(name="Length", value=length, inline=True)
+    embed.add_field(name="Playcount", value=playcount, inline=True)
+    embed.add_field(name="ID", value=f"`{bm_id}`", inline=True)
+
+    description = beatmap.get("description")
+    if description:
+        embed.description = _truncate(str(description), 500)
+    tags = beatmap.get("tags")
+    if tags:
+        embed.add_field(name="Tags", value=_truncate(str(tags), 512), inline=False)
+
+    embed.set_footer(text="rhythia.com/maps")
+    return embed
+
+
+def recent_score_embed(score: dict[str, Any], *, username: str) -> discord.Embed:
+    title = score.get("beatmapTitle") or score.get("songId") or "Unknown beatmap"
+    score_id = score.get("id")
+    awarded = score.get("awarded_sp")
+    stars = score.get("beatmapDifficulty") or score.get("difficulty")
+    misses = score.get("misses")
+    notes = score.get("beatmapNotes")
+    speed = score.get("speed")
+    passed = score.get("passed")
+    spin = score.get("spin")
+    replay_url = score.get("replay_url")
+
+    embed = discord.Embed(
+        title=_truncate(f"{username}'s recent score", 256),
+        description=f"**{_truncate(str(title), 180)}**",
+        color=EMBED_COLOR_SCORE,
+        url=replay_url or None,
+    )
+    embed.add_field(name="SP", value=f"**{_num(awarded)}**", inline=True)
+    embed.add_field(
+        name="Difficulty",
+        value=f"**{_num(stars, decimals=2)}★**" if stars is not None else "—",
+        inline=True,
+    )
+    embed.add_field(name="Misses", value=_num(misses), inline=True)
+    embed.add_field(name="Notes", value=_num(notes), inline=True)
+    embed.add_field(
+        name="Speed",
+        value=f"{float(speed):.2f}x" if isinstance(speed, (int, float)) else "—",
+        inline=True,
+    )
+    embed.add_field(
+        name="Mode",
+        value="Spin" if spin else "Classic",
+        inline=True,
+    )
+    embed.add_field(
+        name="Result",
+        value="Passed" if passed else "Failed",
+        inline=True,
+    )
+    embed.add_field(name="Played", value=_score_time(score.get("created_at")), inline=True)
+    if replay_url:
+        embed.add_field(name="Replay", value=f"[Download]({replay_url})", inline=True)
+    embed.set_footer(text=f"Score ID {score_id}")
     return embed
 
 

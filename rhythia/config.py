@@ -11,11 +11,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 ENV_FILE = PROJECT_ROOT / ".env"
 LINKED_ACCOUNTS_DB_PATH = DATA_DIR / "links.db"
-TOKEN_ENCRYPTION_KEY_FILE = DATA_DIR / ".link_key"
-
-RHYTHIA_OAUTH_BASE_URL = os.environ.get(
-    "RHYTHIA_OAUTH_BASE_URL", "https://pfkajngbllcbdzoylrvp.supabase.co"
-).rstrip("/")
 
 _dotenv_loaded = False
 
@@ -31,8 +26,7 @@ def load_env_file() -> None:
         logger.info("Loaded %s", ENV_FILE.name)
     else:
         logger.warning(
-            "No %s found — set DISCORD_TOKEN (and optionally TOKEN_ENCRYPTION_KEY) "
-            "in environment variables.",
+            "No %s found - set DISCORD_TOKEN in environment variables.",
             ENV_FILE.name,
         )
     _dotenv_loaded = True

@@ -41,26 +41,22 @@ def public_search(*, query: str, limit: int = 10, timeout: float = 30.0) -> dict
 class RhythiaClient:
     def __init__(
         self,
-        token: str,
         *,
         session: requests.Session | None = None,
         timeout: float = 30.0,
     ) -> None:
-        self._token = token.strip()
         self._session = session or requests.Session()
         self._timeout = timeout
 
     def _post(self, endpoint: str, **extra: Any) -> dict[str, Any]:
         url = f"{BASE_URL}/{endpoint}"
-        payload: dict[str, Any] = {"session": self._token, **extra}
+        payload: dict[str, Any] = {**extra}
+        headers = {"Content-Type": "application/json"}
 
         try:
             response = self._session.post(
                 url,
-                headers={
-                    "Authorization": f"Bearer {self._token}",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
                 json=payload,
                 timeout=self._timeout,
             )
@@ -94,6 +90,21 @@ class RhythiaClient:
 
     def get_user_scores(self, *, user_id: int) -> dict[str, Any]:
         return self._post("getUserScores", id=user_id)
+
+    def find_beatmap(self, query: str) -> dict[str, Any] | None:
+        results = self.search(query=query.strip(), limit=10)
+        beatmaps = results.get("beatmaps") or []
+        if not isinstance(beatmaps, list) or not beatmaps:
+            return None
+
+        if query.strip().isdigit():
+            beatmap_id = int(query.strip())
+            for beatmap in beatmaps:
+                if isinstance(beatmap, dict) and beatmap.get("id") == beatmap_id:
+                    return beatmap
+
+        first = beatmaps[0]
+        return first if isinstance(first, dict) else None
 
     def get_beatmaps(
         self,

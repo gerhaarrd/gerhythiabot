@@ -1,21 +1,14 @@
-"""Discord ↔ Rhythia account links (encrypted session tokens)."""
+"""Discord ↔ Rhythia account links."""
 
 from __future__ import annotations
 
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from functools import lru_cache
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from rhythia.config import LINKED_ACCOUNTS_DB_PATH
-from rhythia.oauth_login import session_token_is_expired
-from rhythia.token_encryption import SessionTokenCipher
-
-
-class AccountNotLinkedError(Exception):
-    """Discord user has not linked a Rhythia account yet."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,14 +19,22 @@ class LinkedAccount:
     linked_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class PendingLink:
+    discord_id: int
+    rhythia_user_id: int
+    rhythia_username: str
+    code: str
+    created_at: str
+    expires_at: str
+
+
 class LinkedAccountStore:
     def __init__(
         self,
         db_path: Path = LINKED_ACCOUNTS_DB_PATH,
-        cipher: SessionTokenCipher | None = None,
     ) -> None:
         self._db_path = db_path
-        self._cipher = cipher or SessionTokenCipher.load()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
@@ -70,15 +71,66 @@ class LinkedAccountStore:
                 discord_id TEXT PRIMARY KEY,
                 rhythia_user_id INTEGER,
                 rhythia_username TEXT NOT NULL,
-                token_encrypted TEXT NOT NULL,
+                token_encrypted TEXT,
                 linked_at TEXT NOT NULL
             )
             """
         )
+        self._migrate_token_optional()
         # Index on rhythia_user_id for potential future lookups
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_links_rhythia_user_id ON links (rhythia_user_id)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_links (
+                discord_id TEXT PRIMARY KEY,
+                rhythia_user_id INTEGER NOT NULL,
+                rhythia_username TEXT NOT NULL,
+                code TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+
+    def _migrate_token_optional(self) -> None:
+        conn = self._get_conn()
+        columns = conn.execute("PRAGMA table_info(links)").fetchall()
+        token_column = next(
+            (column for column in columns if column["name"] == "token_encrypted"),
+            None,
+        )
+        if token_column is None or not token_column["notnull"]:
+            return
+
+        with self._lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE links_new (
+                        discord_id TEXT PRIMARY KEY,
+                        rhythia_user_id INTEGER,
+                        rhythia_username TEXT NOT NULL,
+                        token_encrypted TEXT,
+                        linked_at TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO links_new (discord_id, rhythia_user_id, rhythia_username, token_encrypted, linked_at)
+                    SELECT discord_id, rhythia_user_id, rhythia_username, token_encrypted, linked_at
+                    FROM links
+                    """
+                )
+                conn.execute("DROP TABLE links")
+                conn.execute("ALTER TABLE links_new RENAME TO links")
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
     # ------------------------------------------------------------------
     # Public API
@@ -88,11 +140,9 @@ class LinkedAccountStore:
         self,
         discord_id: int,
         *,
-        session_token: str,
-        rhythia_user_id: int | None,
+        rhythia_user_id: int,
         rhythia_username: str,
     ) -> LinkedAccount:
-        encrypted = self._cipher.encrypt(session_token.strip())
         linked_at = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self._get_conn().execute(
@@ -105,10 +155,8 @@ class LinkedAccountStore:
                     token_encrypted = excluded.token_encrypted,
                     linked_at = excluded.linked_at
                 """,
-                (str(discord_id), rhythia_user_id, rhythia_username, encrypted, linked_at),
+                (str(discord_id), rhythia_user_id, rhythia_username, None, linked_at),
             )
-            # Invalidate cached token for this user after re-link
-            self._cached_token.cache_clear()
         return LinkedAccount(
             discord_id=discord_id,
             rhythia_user_id=rhythia_user_id,
@@ -116,21 +164,96 @@ class LinkedAccountStore:
             linked_at=linked_at,
         )
 
-    def get_account(self, discord_id: int) -> LinkedAccount | None:
+    def save_pending(
+        self,
+        discord_id: int,
+        *,
+        rhythia_user_id: int,
+        rhythia_username: str,
+        code: str,
+        ttl_minutes: int = 15,
+    ) -> PendingLink:
+        now = datetime.now(timezone.utc)
+        created_at = now.isoformat()
+        expires_at = (now + timedelta(minutes=ttl_minutes)).isoformat()
+        with self._lock:
+            self._get_conn().execute(
+                """
+                INSERT INTO pending_links (discord_id, rhythia_user_id, rhythia_username, code, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(discord_id) DO UPDATE SET
+                    rhythia_user_id = excluded.rhythia_user_id,
+                    rhythia_username = excluded.rhythia_username,
+                    code = excluded.code,
+                    created_at = excluded.created_at,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    str(discord_id),
+                    rhythia_user_id,
+                    rhythia_username,
+                    code,
+                    created_at,
+                    expires_at,
+                ),
+            )
+        return PendingLink(
+            discord_id=discord_id,
+            rhythia_user_id=rhythia_user_id,
+            rhythia_username=rhythia_username,
+            code=code,
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+
+    def get_pending(self, discord_id: int) -> PendingLink | None:
         row = self._get_conn().execute(
-            "SELECT rhythia_user_id, rhythia_username, linked_at, token_encrypted FROM links WHERE discord_id = ?",
+            """
+            SELECT rhythia_user_id, rhythia_username, code, created_at, expires_at
+            FROM pending_links
+            WHERE discord_id = ?
+            """,
             (str(discord_id),),
         ).fetchone()
         if row is None:
             return None
 
-        try:
-            token = self._cipher.decrypt(row["token_encrypted"])
-        except ValueError:
+        expires_at = datetime.fromisoformat(row["expires_at"])
+        if expires_at <= datetime.now(timezone.utc):
+            self.delete_pending(discord_id)
             return None
 
-        if session_token_is_expired(token):
-            self.delete(discord_id)
+        return PendingLink(
+            discord_id=discord_id,
+            rhythia_user_id=row["rhythia_user_id"],
+            rhythia_username=row["rhythia_username"],
+            code=row["code"],
+            created_at=row["created_at"],
+            expires_at=row["expires_at"],
+        )
+
+    def delete_pending(self, discord_id: int) -> bool:
+        with self._lock:
+            cursor = self._get_conn().execute(
+                "DELETE FROM pending_links WHERE discord_id = ?",
+                (str(discord_id),),
+            )
+            return cursor.rowcount > 0
+
+    def cleanup_expired_pending(self) -> int:
+        with self._lock:
+            cursor = self._get_conn().execute(
+                "DELETE FROM pending_links WHERE expires_at <= ?",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            return cursor.rowcount
+
+    def get_account(self, discord_id: int) -> LinkedAccount | None:
+        row = self._get_conn().execute(
+            "SELECT rhythia_user_id, rhythia_username, linked_at FROM links WHERE discord_id = ?",
+            (str(discord_id),),
+        ).fetchone()
+        if row is None:
             return None
 
         return LinkedAccount(
@@ -140,30 +263,6 @@ class LinkedAccountStore:
             linked_at=row["linked_at"],
         )
 
-    def get_session_token(self, discord_id: int) -> str:
-        return self._cached_token(discord_id)
-
-    def cleanup_expired_tokens(self) -> int:
-        with self._lock:
-            cursor = self._get_conn().execute(
-                "SELECT discord_id, token_encrypted FROM links"
-            )
-            deleted = 0
-            for row in cursor:
-                try:
-                    token = self._cipher.decrypt(row["token_encrypted"])
-                except ValueError:
-                    continue
-                if session_token_is_expired(token):
-                    self._get_conn().execute(
-                        "DELETE FROM links WHERE discord_id = ?",
-                        (row["discord_id"],),
-                    )
-                    deleted += 1
-            if deleted:
-                self._cached_token.cache_clear()
-            return deleted
-
     def delete(self, discord_id: int) -> bool:
         with self._lock:
             cursor = self._get_conn().execute(
@@ -171,35 +270,5 @@ class LinkedAccountStore:
                 (str(discord_id),),
             )
             if cursor.rowcount > 0:
-                self._cached_token.cache_clear()
                 return True
             return False
-
-    # ------------------------------------------------------------------
-    # Internal — LRU cache for decrypted tokens (avoids Fernet overhead
-    # on repeated commands from the same user in a short window)
-    # ------------------------------------------------------------------
-
-    @lru_cache(maxsize=256)
-    def _cached_token(self, discord_id: int) -> str:
-        row = self._get_conn().execute(
-            "SELECT token_encrypted FROM links WHERE discord_id = ?",
-            (str(discord_id),),
-        ).fetchone()
-        if row is None:
-            raise AccountNotLinkedError(
-                "You haven't linked your account yet. Use `/rhythia link` to connect."
-            )
-
-        token = self._cipher.decrypt(row["token_encrypted"])
-        if session_token_is_expired(token):
-            with self._lock:
-                self._get_conn().execute(
-                    "DELETE FROM links WHERE discord_id = ?",
-                    (str(discord_id),),
-                )
-                self._cached_token.cache_clear()
-            raise AccountNotLinkedError(
-                "Your session token expired. Use `/rhythia link` again."
-            )
-        return token
