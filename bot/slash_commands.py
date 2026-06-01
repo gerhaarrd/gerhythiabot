@@ -524,7 +524,15 @@ class RhythiaSlashCommands(commands.Cog):
 
         client = self.bot.client_for()
 
-        await interaction.response.defer(thinking=True)
+        # Only defer if response hasn't been sent yet
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(thinking=True)
+            except discord.NotFound:
+                # Interaction expired, can't respond
+                logger.warning("Interaction expired (discord=%s)", interaction.user.id)
+                return
+        
         try:
             with client:
                 data = fetch(client)
@@ -550,7 +558,15 @@ class RhythiaSlashCommands(commands.Cog):
 
         client = self.bot.client_for()
 
-        await interaction.response.defer(thinking=True)
+        # Only defer if response hasn't been sent yet
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(thinking=True)
+            except discord.NotFound:
+                # Interaction expired, can't respond
+                logger.warning("Interaction expired (discord=%s)", interaction.user.id)
+                return
+        
         try:
             with client:
                 data = fetch(client, initial_page)
