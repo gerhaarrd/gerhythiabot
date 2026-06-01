@@ -203,6 +203,7 @@ def leaderboard_embed(
     limit: int = 10,
     country: str | None = None,
     spin: bool = False,
+    user_position: int | None = None,
 ) -> discord.Embed:
     entries = data.get("leaderboard") or []
     page = int(data.get("currentPage") or 1)
@@ -253,7 +254,8 @@ def leaderboard_embed(
         color=EMBED_COLOR_LEADERBOARD,
     )
 
-    position = data.get("userPosition")
+    # Use provided user_position, fall back to data.get("userPosition")
+    position = user_position if user_position is not None else data.get("userPosition")
     # Show user's rank if available (0 or None means not on leaderboard)
     if position:  # 0 is falsy, None is falsy, so this skips both
         embed.add_field(name="Your rank", value=f"**#{int(position):,}**", inline=False)

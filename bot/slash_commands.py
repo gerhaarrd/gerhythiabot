@@ -283,11 +283,32 @@ class RhythiaSlashCommands(commands.Cog):
         limit: app_commands.Range[int, 1, 15] = 10,
         spin: bool = False,
     ) -> None:
+        if interaction.user is None:
+            return
+
         try:
             country_code = _normalize_country(country)
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+
+        # Get user's rank from linked account if available
+        user_position: int | None = None
+        linked = self.bot.linked_accounts.get_account(interaction.user.id)
+        if linked and linked.rhythia_user_id:
+            try:
+                client = self.bot.client_for()
+                with client:
+                    profile = client.get_profile(user_id=linked.rhythia_user_id)
+                    user_data = profile.get("user", {})
+                    # Use global position for global leaderboard, country_position for country leaderboard
+                    if country_code:
+                        user_position = user_data.get("country_position")
+                    else:
+                        user_position = user_data.get("position")
+            except RhythiaAPIError:
+                # If we can't fetch position, just show leaderboard without user position
+                pass
 
         await self._reply_with_navigable_embed(
             interaction,
@@ -295,7 +316,7 @@ class RhythiaSlashCommands(commands.Cog):
                 page=p, country=country_code, spin=spin
             ),
             build=lambda d: leaderboard_embed(
-                d, limit=limit, country=country_code, spin=spin
+                d, limit=limit, country=country_code, spin=spin, user_position=user_position
             ),
             initial_page=page,
         )
