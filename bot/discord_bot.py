@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 
 import discord
+import requests
 from discord.ext import commands
 
 from rhythia.api_client import RhythiaClient
@@ -11,6 +13,8 @@ from rhythia.config import Settings
 from rhythia.linked_accounts import LinkedAccountStore
 
 logger = logging.getLogger(__name__)
+
+BASE_URL = "https://production.rhythia.com/api"
 
 
 class RhythiaBot(commands.Bot):
@@ -23,6 +27,8 @@ class RhythiaBot(commands.Bot):
         if deleted:
             logger.info("Removed %d expired pending link(s)", deleted)
         self._presence_task: asyncio.Task[None] | None = None
+        self._stats_cache: dict[str, int] = {}
+        self._stats_updated: datetime | None = None
 
     def client_for(self, discord_id: int | None = None) -> RhythiaClient:
         return RhythiaClient()
@@ -63,11 +69,10 @@ class RhythiaBot(commands.Bot):
 
     async def _rotate_presence(self) -> None:
         await self.wait_until_ready()
-
-        messages = self._presence_messages()
         index = 0
 
         while not self.is_closed():
+            messages = await self._get_presence_messages()
             message = messages[index % len(messages)]
             index += 1
             try:
@@ -81,12 +86,86 @@ class RhythiaBot(commands.Bot):
                 logger.warning("Could not update Discord presence: %s", exc)
             await asyncio.sleep(60)
 
-    @staticmethod
-    def _presence_messages() -> list[str]:
-        return [
+    async def _get_presence_messages(self) -> list[str]:
+        """Generate presence messages with real Rhythia stats."""
+        await self._update_stats_cache()
+        
+        messages = [
             "/gerhythia help",
             "/gerhythia search",
-            "/gerhythia maps",
-            "Rhythia profiles",
-            "Rhythia beatmaps",
         ]
+        
+        if beatmap_count := self._stats_cache.get("beatmaps"):
+            messages.append(f"{beatmap_count:,} beatmaps")
+        else:
+            messages.append("/gerhythia maps")
+        
+        if player_count := self._stats_cache.get("players"):
+            messages.append(f"{player_count:,} players")
+        else:
+            messages.append("Rhythia profiles")
+        
+        return messages
+
+    async def _update_stats_cache(self) -> None:
+        """Fetch Rhythia stats if cache is stale (older than 30 minutes)."""
+        now = datetime.now()
+        
+        # Only update if cache is empty or older than 30 minutes
+        if self._stats_updated and (now - self._stats_updated) < timedelta(minutes=30):
+            return
+        
+        loop = asyncio.get_event_loop()
+        try:
+            stats = await loop.run_in_executor(None, self._fetch_rhythia_stats)
+            self._stats_cache = stats
+            self._stats_updated = now
+            logger.info("Updated Rhythia stats: %s", stats)
+        except Exception as exc:
+            logger.warning("Failed to fetch Rhythia stats: %s", exc)
+
+    @staticmethod
+    def _fetch_rhythia_stats() -> dict[str, int]:
+        """Fetch stats from Rhythia API (blocking call, run in executor)."""
+        stats = {}
+        
+        try:
+            # Get beatmap count
+            response = requests.post(
+                f"{BASE_URL}/getBeatmaps",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "session": "",
+                    "page": 1,
+                    "textFilter": "",
+                    "authorFilter": "",
+                    "tagsFilter": "",
+                    "minStars": 0,
+                    "maxStars": 20,
+                    "status": "",
+                },
+                timeout=5,
+            )
+            if response.ok:
+                data = response.json()
+                if isinstance(data, dict) and "total" in data:
+                    stats["beatmaps"] = data["total"]
+        except Exception as exc:
+            logger.debug("Failed to get beatmap stats: %s", exc)
+        
+        try:
+            # Get player/leaderboard count
+            response = requests.post(
+                f"{BASE_URL}/getLeaderboard",
+                headers={"Content-Type": "application/json"},
+                json={"session": "", "page": 1, "spin": False, "include_inactive": False},
+                timeout=5,
+            )
+            if response.ok:
+                data = response.json()
+                if isinstance(data, dict) and "total" in data:
+                    stats["players"] = data["total"]
+        except Exception as exc:
+            logger.debug("Failed to get leaderboard stats: %s", exc)
+        
+        return stats
