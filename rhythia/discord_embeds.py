@@ -77,10 +77,21 @@ def _asset_url(value: Any) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
 
 
-def _paginated_footer(data: dict[str, Any], *, extra: str = "") -> str:
+def _paginated_footer(
+    data: dict[str, Any],
+    *,
+    extra: str = "",
+    user_page: int | None = None,
+    user_per_page: int | None = None,
+) -> str:
     total = int(data.get("total") or 0)
-    page = int(data.get("currentPage") or 1)
-    per_page = int(data.get("viewPerPage") or 0)
+    # Use user page info if provided, otherwise fall back to API page info
+    if user_page is not None:
+        page = user_page
+        per_page = user_per_page if user_per_page is not None else 10
+    else:
+        page = int(data.get("currentPage") or 1)
+        per_page = int(data.get("viewPerPage") or 0)
     parts = [f"Page {page}", f"{per_page}/page", f"{total:,} total"]
     if extra:
         parts.insert(0, extra)
@@ -199,6 +210,7 @@ def profile_embed(
 
 def leaderboard_embed(
     data: dict[str, Any],
+    user_page: int | None = None,
     *,
     limit: int = 10,
     country: str | None = None,
@@ -206,9 +218,19 @@ def leaderboard_embed(
     user_position: int | None = None,
 ) -> discord.Embed:
     entries = data.get("leaderboard") or []
-    page = int(data.get("currentPage") or 1)
-    per_page = int(data.get("viewPerPage") or 50)
-    start_rank = (page - 1) * per_page
+    # Use user_page to calculate ranks and slice the correct portion
+    if user_page is not None:
+        start_rank = (user_page - 1) * limit
+        # Calculate offset within the API page (API returns 50 items per page)
+        api_page_size = int(data.get("viewPerPage") or 50)
+        offset = ((user_page - 1) * limit) % api_page_size
+        entries = entries[offset:offset + limit]
+    else:
+        # Fallback to API page info
+        page = int(data.get("currentPage") or 1)
+        per_page = int(data.get("viewPerPage") or 50)
+        start_rank = (page - 1) * per_page
+        entries = entries[:limit]
 
     filter_bits: list[str] = []
     if country:
@@ -219,7 +241,7 @@ def leaderboard_embed(
         filter_bits.append("Spin")
 
     lines: list[str] = []
-    for index, entry in enumerate(entries[:limit], start=1):
+    for index, entry in enumerate(entries, start=1):
         rank = start_rank + index
         flag = flag_emoji(entry.get("flag"))
         username = entry.get("username", "?")
@@ -266,20 +288,34 @@ def leaderboard_embed(
             # If position isn't an int, skip showing it
             pass
 
-    embed.set_footer(text=_paginated_footer(data, extra=" · ".join(filter_bits)))
+    embed.set_footer(text=_paginated_footer(
+        data,
+        extra=" · ".join(filter_bits),
+        user_page=user_page,
+        user_per_page=limit,
+    ))
     return embed
 
 
 def beatmaps_embed(
     data: dict[str, Any],
+    user_page: int | None = None,
     *,
     limit: int = 10,
     filters_label: str = "",
 ) -> discord.Embed:
     beatmaps = data.get("beatmaps") or []
 
+    # Slice the correct portion of beatmaps based on user_page
+    if user_page is not None:
+        api_page_size = int(data.get("viewPerPage") or 50)
+        offset = ((user_page - 1) * limit) % api_page_size
+        beatmaps = beatmaps[offset:offset + limit]
+    else:
+        beatmaps = beatmaps[:limit]
+
     lines: list[str] = []
-    for bm in beatmaps[:limit]:
+    for bm in beatmaps:
         bm_id = bm.get("id", "?")
         stars = bm.get("starRating")
         stars_text = f"{stars:.2f}★" if isinstance(stars, (int, float)) else "—"
@@ -305,9 +341,18 @@ def beatmaps_embed(
         color=EMBED_COLOR_MAPS,
     )
     if filters_label:
-        embed.set_footer(text=_paginated_footer(data, extra=filters_label))
+        embed.set_footer(text=_paginated_footer(
+            data,
+            extra=filters_label,
+            user_page=user_page,
+            user_per_page=limit,
+        ))
     else:
-        embed.set_footer(text=_paginated_footer(data))
+        embed.set_footer(text=_paginated_footer(
+            data,
+            user_page=user_page,
+            user_per_page=limit,
+        ))
     return embed
 
 

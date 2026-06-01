@@ -46,15 +46,20 @@ async def country_autocomplete(
     interaction: discord.Interaction,
     current: str,
 ) -> list[app_commands.Choice[str]]:
-    cur = current.lower()
-    choices: list[app_commands.Choice[str]] = []
-    for name, code in COUNTRY_CHOICES:
-        if cur in name.lower() or cur in code.lower() or not cur:
-            label = f"{name} ({code})" if code else name
-            choices.append(app_commands.Choice(name=label, value=code or "GLOBAL"))
-        if len(choices) >= 25:
-            break
-    return choices
+    try:
+        cur = current.lower()
+        choices: list[app_commands.Choice[str]] = []
+        for name, code in COUNTRY_CHOICES:
+            if cur in name.lower() or cur in code.lower() or not cur:
+                label = f"{name} ({code})" if code else name
+                choices.append(app_commands.Choice(name=label, value=code or "GLOBAL"))
+            if len(choices) >= 25:
+                break
+        return choices
+    except discord.NotFound:
+        # Interaction expired during autocomplete, return empty list
+        logger.warning("Autocomplete interaction expired (user_id=%s)", interaction.user.id if interaction.user else "unknown")
+        return []
 
 
 def _normalize_country(value: str | None) -> str | None:
@@ -266,12 +271,10 @@ class RhythiaSlashCommands(commands.Cog):
         except RhythiaAPIError as exc:
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
 
-    @rhythia.command(name="leaderboard", description="Skill points leaderboard")
+    @rhythia.command(name="leaderboard", description="Skill points leaderboard (10 players per page)")
     @app_commands.checks.cooldown(API_COOLDOWN_RATE, API_COOLDOWN_PERIOD)
     @app_commands.describe(
         country="Country (ISO code) or Global",
-        page="Page (50 players per page)",
-        limit="Rows in embed (max 15)",
         spin="Spin skill ranking",
     )
     @app_commands.autocomplete(country=country_autocomplete)
@@ -279,10 +282,9 @@ class RhythiaSlashCommands(commands.Cog):
         self,
         interaction: discord.Interaction,
         country: str | None = None,
-        page: app_commands.Range[int, 1, 100] = 1,
-        limit: app_commands.Range[int, 1, 15] = 10,
         spin: bool = False,
     ) -> None:
+        LEADERBOARD_LIMIT = 10 
         if interaction.user is None:
             return
 
@@ -327,13 +329,13 @@ class RhythiaSlashCommands(commands.Cog):
             fetch=lambda c, p: c.get_leaderboard(
                 page=p, country=country_code, spin=spin
             ),
-            build=lambda d: leaderboard_embed(
-                d, limit=limit, country=country_code, spin=spin, user_position=user_position
+            build=lambda d, up=1: leaderboard_embed(
+                d, up, limit=LEADERBOARD_LIMIT, country=country_code, spin=spin, user_position=user_position
             ),
-            initial_page=page,
+            page_size=LEADERBOARD_LIMIT,
         )
 
-    @rhythia.command(name="maps", description="Browse and filter beatmaps")
+    @rhythia.command(name="maps", description="Browse and filter beatmaps (10 maps per page)")
     @app_commands.checks.cooldown(API_COOLDOWN_RATE, API_COOLDOWN_PERIOD)
     @app_commands.describe(
         title="Text in map title",
@@ -341,8 +343,6 @@ class RhythiaSlashCommands(commands.Cog):
         status="Map status",
         min_stars="Minimum star rating",
         max_stars="Maximum star rating",
-        page="Page number",
-        limit="Maps in embed (max 10)",
     )
     @app_commands.choices(
         status=[
@@ -358,9 +358,8 @@ class RhythiaSlashCommands(commands.Cog):
         status: app_commands.Choice[str] | None = None,
         min_stars: app_commands.Range[float, 0, 20] = 0,
         max_stars: app_commands.Range[float, 0, 20] = 20,
-        page: app_commands.Range[int, 1, 100] = 1,
-        limit: app_commands.Range[int, 1, 10] = 8,
     ) -> None:
+        MAPS_LIMIT = 10  # Fixed: always show 10 maps per page
         if min_stars > max_stars:
             await interaction.response.send_message(
                 "Minimum stars cannot be greater than maximum.",
@@ -389,8 +388,8 @@ class RhythiaSlashCommands(commands.Cog):
                 min_stars=min_stars,
                 max_stars=max_stars,
             ),
-            build=lambda d: beatmaps_embed(d, limit=limit, filters_label=label),
-            initial_page=page,
+            build=lambda d, up=1: beatmaps_embed(d, up, limit=MAPS_LIMIT, filters_label=label),
+            page_size=MAPS_LIMIT,
         )
 
     @rhythia.command(name="beatmap", description="Show one beatmap by id or title")
@@ -463,7 +462,7 @@ class RhythiaSlashCommands(commands.Cog):
         except RhythiaAPIError as exc:
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
 
-    @rhythia.command(name="suggest", description="Suggest Ranked maps based on user's top scores")
+    @rhythia.command(name="suggest", description="Suggest Ranked maps based on user's top scores (10 maps per page)")
     @app_commands.checks.cooldown(HEAVY_COOLDOWN_RATE, HEAVY_COOLDOWN_PERIOD)
     @app_commands.describe(
         username="Player name (empty = linked account).",
@@ -473,12 +472,19 @@ class RhythiaSlashCommands(commands.Cog):
         interaction: discord.Interaction,
         username: str | None = None,
     ) -> None:
+        SUGGEST_LIMIT = 10  # Fixed: always show 10 maps per page
         if interaction.user is None:
             return
 
-        await interaction.response.defer(thinking=True)
-        client = self.bot.client_for()
+        # Defer early to avoid interaction timeout
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(thinking=True)
+            except discord.NotFound:
+                logger.warning("Interaction expired (discord=%s)", interaction.user.id)
+                return
 
+        client = self.bot.client_for()
         query = (username or "").strip()
         
         try:
@@ -499,7 +505,7 @@ class RhythiaSlashCommands(commands.Cog):
                     await interaction.followup.send(f"**{target_name}** has no top scores yet.")
                     return
                 
-                # Usar até 10 top scores para a média
+                # Use up to 10 top scores for the average
                 top_10 = top_scores[:10]
                 avg_stars = sum(s.get("beatmapDifficulty") or 0 for s in top_10) / len(top_10)
                 avg_rp = sum(s.get("awarded_sp") or 0 for s in top_10) / len(top_10)
@@ -509,14 +515,17 @@ class RhythiaSlashCommands(commands.Cog):
                 
                 filters_label = f"{target_name} · Avg {avg_rp:.0f} RP · {min_stars:.1f}★–{max_stars:.1f}★"
 
-                maps_data = client.get_beatmaps(
-                    page=1,
+            await self._reply_with_navigable_embed(
+                interaction,
+                fetch=lambda c, p: c.get_beatmaps(
+                    page=p,
                     status="RANKED",
                     min_stars=min_stars,
                     max_stars=max_stars,
-                )
-                
-            await interaction.followup.send(embed=beatmaps_embed(maps_data, limit=8, filters_label=filters_label))
+                ),
+                build=lambda d, up=1: beatmaps_embed(d, up, limit=SUGGEST_LIMIT, filters_label=filters_label),
+                page_size=SUGGEST_LIMIT,
+            )
         except RhythiaAPIError as exc:
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
 
@@ -582,8 +591,9 @@ class RhythiaSlashCommands(commands.Cog):
         interaction: discord.Interaction,
         *,
         fetch: Callable[[RhythiaClient, int], dict[str, Any]],
-        build: Callable[[dict[str, Any]], discord.Embed],
-        initial_page: int = 1,
+        build: Callable[[dict[str, Any], int], discord.Embed],
+        initial_user_page: int = 1,
+        page_size: int | None = None,
     ) -> None:
         """Reply with an embed that has navigation buttons."""
         if interaction.user is None:
@@ -599,24 +609,30 @@ class RhythiaSlashCommands(commands.Cog):
                 # Interaction expired, can't respond
                 logger.warning("Interaction expired (discord=%s)", interaction.user.id)
                 return
-        
+
         try:
             with client:
-                data = fetch(client, initial_page)
+                # Convert user page to API page for initial fetch
+                from bot.embed_navigator import API_PAGE_SIZE
+                actual_page_size = page_size or API_PAGE_SIZE
+                first_item_index = (initial_user_page - 1) * actual_page_size
+                api_page = (first_item_index // 50) + 1
+                data = fetch(client, api_page)
 
-            # Calculate max pages from response data
+            # Calculate max pages using user-specified page_size
             total = data.get("total", 0)
-            per_page = data.get("viewPerPage", 50)
+            per_page = actual_page_size
             max_pages = (total + per_page - 1) // per_page if total > 0 else 1
 
-            embed = build(data)
+            embed = build(data, initial_user_page)
             view = EmbedNavigatorView(
                 interaction,
                 fetch=fetch,
                 build=build,
                 initial_data=data,
-                initial_page=initial_page,
+                initial_user_page=initial_user_page,
                 max_pages=max_pages,
+                page_size=page_size,
             )
             await interaction.followup.send(embed=embed, view=view)
         except RhythiaAPIError as exc:

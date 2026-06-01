@@ -14,7 +14,7 @@ def public_search(*, query: str, limit: int = 10, timeout: float = 30.0) -> dict
         response = requests.post(
             f"{BASE_URL}/enhancedSearch",
             headers={"Content-Type": "application/json"},
-            json={"session": "", "text": query, "limit": limit},
+            json={"text": query, "limit": limit},
             timeout=timeout,
         )
     except requests.RequestException as exc:
