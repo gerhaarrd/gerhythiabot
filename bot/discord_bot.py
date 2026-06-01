@@ -43,16 +43,16 @@ class RhythiaBot(commands.Bot):
             logger.info("Command sync skipped (SKIP_COMMAND_SYNC=1)")
             return
 
+        # Always sync globally for public bot
+        await self.tree.sync()
+        logger.info("Commands synced globally")
+
+        # Optionally also sync to a specific guild for faster testing
         if self.settings.guild_id:
             guild = discord.Object(id=self.settings.guild_id)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            self.tree.clear_commands(guild=None)
-            await self.tree.sync(guild=None)
-            logger.info("Commands synced to guild %s (global cleared to avoid duplicates)", self.settings.guild_id)
-        else:
-            await self.tree.sync()
-            logger.info("Commands synced globally")
+            logger.info("Commands also synced to guild %s for faster testing", self.settings.guild_id)
 
     async def close(self) -> None:
         if self._presence_task:
