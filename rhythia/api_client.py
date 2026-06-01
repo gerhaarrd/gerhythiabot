@@ -14,7 +14,7 @@ def public_search(*, query: str, limit: int = 10, timeout: float = 30.0) -> dict
         response = requests.post(
             f"{BASE_URL}/enhancedSearch",
             headers={"Content-Type": "application/json"},
-            json={"text": query, "limit": limit},
+            json={"session": "", "text": query, "limit": limit},
             timeout=timeout,
         )
     except requests.RequestException as exc:
@@ -50,7 +50,7 @@ class RhythiaClient:
 
     def _post(self, endpoint: str, **extra: Any) -> dict[str, Any]:
         url = f"{BASE_URL}/{endpoint}"
-        payload: dict[str, Any] = {**extra}
+        payload: dict[str, Any] = {"session": "", **extra}
         headers = {"Content-Type": "application/json"}
 
         try:
