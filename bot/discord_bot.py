@@ -46,7 +46,6 @@ class RhythiaBot(commands.Bot):
         await self.tree.sync()
         logger.info("Commands synced globally")
 
-        # Optionally also sync to a specific guild for faster testing
         if self.settings.guild_id:
             guild = discord.Object(id=self.settings.guild_id)
             self.tree.copy_global_to(guild=guild)
