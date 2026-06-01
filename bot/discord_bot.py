@@ -43,7 +43,6 @@ class RhythiaBot(commands.Bot):
             logger.info("Command sync skipped (SKIP_COMMAND_SYNC=1)")
             return
 
-        # Always sync globally for public bot
         await self.tree.sync()
         logger.info("Commands synced globally")
 
