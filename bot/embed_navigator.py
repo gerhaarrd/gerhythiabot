@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import Any, TYPE_CHECKING
 
 import discord
 from discord import ui
@@ -25,7 +26,7 @@ class EmbedNavigatorView(ui.View):
         self,
         interaction: discord.Interaction,
         *,
-        fetch: Callable[[RhythiaClient, int], dict[str, Any]],
+        fetch: Callable[[RhythiaClient, int], Awaitable[dict[str, Any]]],
         build: Callable[[dict[str, Any], int], discord.Embed],
         initial_data: dict[str, Any],
         initial_user_page: int = 1,
@@ -90,7 +91,6 @@ class EmbedNavigatorView(ui.View):
 
     async def _update_embed(self, interaction: discord.Interaction) -> None:
         """Fetch new page and update the embed."""
-        # Import here to avoid circular imports
         from bot.discord_bot import RhythiaBot
 
         if interaction.user is None:
@@ -121,10 +121,9 @@ class EmbedNavigatorView(ui.View):
         client = bot.client_for()
 
         try:
-            with client:
-                # Convert user page number to API page number
-                api_page = self._user_page_to_api_page(self.current_user_page)
-                self.current_data = self.fetch(client, api_page)
+            # Convert user page number to API page number
+            api_page = self._user_page_to_api_page(self.current_user_page)
+            self.current_data = await self.fetch(client, api_page)
 
             # Update max_pages if available from the data
             if "total" in self.current_data:

@@ -2,97 +2,121 @@ from __future__ import annotations
 
 from typing import Any
 
-import requests
+import aiohttp
 
 from rhythia.api_errors import RhythiaAPIError
 
 BASE_URL = "https://production.rhythia.com/api"
 
 
-def public_search(*, query: str, limit: int = 10, timeout: float = 30.0) -> dict[str, Any]:
+async def public_search(
+    *,
+    query: str,
+    limit: int = 10,
+    timeout: float = 30.0,
+    session: aiohttp.ClientSession | None = None,
+) -> dict[str, Any]:
+    """Search Rhythia for players and beatmaps (public endpoint)."""
+    close_session = False
+    if session is None:
+        session = aiohttp.ClientSession()
+        close_session = True
+
     try:
-        response = requests.post(
+        client_timeout = aiohttp.ClientTimeout(total=timeout)
+        async with session.post(
             f"{BASE_URL}/enhancedSearch",
             headers={"Content-Type": "application/json"},
             json={"text": query, "limit": limit},
-            timeout=timeout,
-        )
-    except requests.RequestException as exc:
+            timeout=client_timeout,
+        ) as response:
+            try:
+                body = await response.json()
+            except (ValueError, aiohttp.ContentTypeError) as exc:
+                raise RhythiaAPIError(
+                    f"Invalid response (HTTP {response.status})",
+                    status_code=response.status,
+                ) from exc
+
+            if not response.ok:
+                raise RhythiaAPIError(
+                    f"HTTP {response.status}: {body}",
+                    status_code=response.status,
+                )
+            if not isinstance(body, dict):
+                raise RhythiaAPIError("Unexpected response format.")
+            return body
+    except aiohttp.ClientError as exc:
         raise RhythiaAPIError(f"Network error: {exc}") from exc
-
-    try:
-        body = response.json()
-    except ValueError as exc:
-        raise RhythiaAPIError(
-            f"Invalid response (HTTP {response.status_code})",
-            status_code=response.status_code,
-        ) from exc
-
-    if not response.ok:
-        raise RhythiaAPIError(
-            f"HTTP {response.status_code}: {body}",
-            status_code=response.status_code,
-        )
-    if not isinstance(body, dict):
-        raise RhythiaAPIError("Unexpected response format.")
-    return body
+    finally:
+        if close_session:
+            await session.close()
 
 
 class RhythiaClient:
     def __init__(
         self,
         *,
-        session: requests.Session | None = None,
+        session: aiohttp.ClientSession | None = None,
         timeout: float = 30.0,
     ) -> None:
-        self._session = session or requests.Session()
+        self._session = session
+        self._owns_session = session is None
         self._timeout = timeout
 
-    def _post(self, endpoint: str, **extra: Any) -> dict[str, Any]:
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+            self._owns_session = True
+        return self._session
+
+    async def _post(self, endpoint: str, **extra: Any) -> dict[str, Any]:
         url = f"{BASE_URL}/{endpoint}"
         payload: dict[str, Any] = {"session": "", **extra}
         headers = {"Content-Type": "application/json"}
 
+        session = await self._ensure_session()
+        client_timeout = aiohttp.ClientTimeout(total=self._timeout)
+
         try:
-            response = self._session.post(
+            async with session.post(
                 url,
                 headers=headers,
                 json=payload,
-                timeout=self._timeout,
-            )
-        except requests.RequestException as exc:
+                timeout=client_timeout,
+            ) as response:
+                try:
+                    body = await response.json()
+                except (ValueError, aiohttp.ContentTypeError) as exc:
+                    raise RhythiaAPIError(
+                        f"Invalid response (HTTP {response.status})",
+                        status_code=response.status,
+                    ) from exc
+
+                if not response.ok:
+                    detail = body if isinstance(body, str) else body.get("message", body)
+                    raise RhythiaAPIError(
+                        f"HTTP {response.status}: {detail}",
+                        status_code=response.status,
+                    )
+
+                if not isinstance(body, dict):
+                    raise RhythiaAPIError("Unexpected response format.")
+
+                return body
+        except aiohttp.ClientError as exc:
             raise RhythiaAPIError(f"Network error: {exc}") from exc
 
-        try:
-            body = response.json()
-        except ValueError as exc:
-            raise RhythiaAPIError(
-                f"Invalid response (HTTP {response.status_code})",
-                status_code=response.status_code,
-            ) from exc
-
-        if not response.ok:
-            detail = body if isinstance(body, str) else body.get("message", body)
-            raise RhythiaAPIError(
-                f"HTTP {response.status_code}: {detail}",
-                status_code=response.status_code,
-            )
-
-        if not isinstance(body, dict):
-            raise RhythiaAPIError("Unexpected response format.")
-
-        return body
-
-    def get_profile(self, *, user_id: int | None = None) -> dict[str, Any]:
+    async def get_profile(self, *, user_id: int | None = None) -> dict[str, Any]:
         if user_id is not None:
-            return self._post("getProfile", id=user_id)
-        return self._post("getProfile")
+            return await self._post("getProfile", id=user_id)
+        return await self._post("getProfile")
 
-    def get_user_scores(self, *, user_id: int) -> dict[str, Any]:
-        return self._post("getUserScores", id=user_id)
+    async def get_user_scores(self, *, user_id: int) -> dict[str, Any]:
+        return await self._post("getUserScores", id=user_id)
 
-    def find_beatmap(self, query: str) -> dict[str, Any] | None:
-        results = self.search(query=query.strip(), limit=10)
+    async def find_beatmap(self, query: str) -> dict[str, Any] | None:
+        results = await self.search(query=query.strip(), limit=10)
         beatmaps = results.get("beatmaps") or []
         if not isinstance(beatmaps, list) or not beatmaps:
             return None
@@ -106,7 +130,7 @@ class RhythiaClient:
         first = beatmaps[0]
         return first if isinstance(first, dict) else None
 
-    def get_beatmaps(
+    async def get_beatmaps(
         self,
         *,
         page: int = 1,
@@ -129,9 +153,9 @@ class RhythiaClient:
         }
         if creator_id is not None:
             payload["creator"] = creator_id
-        return self._post("getBeatmaps", **payload)
+        return await self._post("getBeatmaps", **payload)
 
-    def get_leaderboard(
+    async def get_leaderboard(
         self,
         *,
         page: int = 1,
@@ -146,16 +170,19 @@ class RhythiaClient:
         }
         if country:
             payload["flag"] = country.upper()
-        return self._post("getLeaderboard", **payload)
+        return await self._post("getLeaderboard", **payload)
 
-    def search(self, *, query: str, limit: int = 10) -> dict[str, Any]:
-        return public_search(query=query, limit=limit, timeout=self._timeout)
+    async def search(self, *, query: str, limit: int = 10) -> dict[str, Any]:
+        session = await self._ensure_session()
+        return await public_search(query=query, limit=limit, timeout=self._timeout, session=session)
 
-    def close(self) -> None:
-        self._session.close()
+    async def close(self) -> None:
+        if self._owns_session and self._session is not None and not self._session.closed:
+            await self._session.close()
 
-    def __enter__(self) -> RhythiaClient:
+    async def __aenter__(self) -> RhythiaClient:
+        await self._ensure_session()
         return self
 
-    def __exit__(self, *args: object) -> None:
-        self.close()
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()

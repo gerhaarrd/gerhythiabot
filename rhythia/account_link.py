@@ -22,13 +22,13 @@ CODE_PREFIX = "GERHYTHIA"
 CODE_ALPHABET = string.ascii_uppercase + string.digits
 
 
-def find_link_candidates(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
+async def find_link_candidates(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
     text = query.strip()
     if len(text) < 2:
         raise AccountLinkError("Type at least 2 characters from your Rhythia username.")
 
     try:
-        results = public_search(query=text, limit=limit)
+        results = await public_search(query=text, limit=limit)
     except RhythiaAPIError as exc:
         raise AccountLinkError(f"Rhythia search failed: {exc}") from exc
 
@@ -58,7 +58,7 @@ def create_pending_rhythia_link(
     )
 
 
-def verify_pending_rhythia_link(bot: RhythiaBot, *, discord_id: int) -> str:
+async def verify_pending_rhythia_link(bot: RhythiaBot, *, discord_id: int) -> str:
     pending = bot.linked_accounts.get_pending(discord_id)
     if pending is None:
         raise AccountLinkError(
@@ -66,8 +66,8 @@ def verify_pending_rhythia_link(bot: RhythiaBot, *, discord_id: int) -> str:
         )
 
     try:
-        with RhythiaClient() as client:
-            data = client.get_profile(user_id=pending.rhythia_user_id)
+        client = bot.client_for()
+        data = await client.get_profile(user_id=pending.rhythia_user_id)
     except RhythiaAPIError as exc:
         raise AccountLinkError(f"Rhythia profile lookup failed: {exc}") from exc
 

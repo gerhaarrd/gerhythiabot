@@ -7,7 +7,6 @@ MAP_STATUS_CHOICES: list[tuple[str, str]] = [
     ("Ranked", "RANKED"),
     ("Unranked", "UNRANKED"),
     ("Qualified", "QUALIFIED"),
-    ("Pending", "PENDING"),
 ]
 
 COUNTRY_CHOICES: list[tuple[str, str]] = [

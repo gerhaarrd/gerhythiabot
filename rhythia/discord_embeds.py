@@ -128,9 +128,9 @@ def help_embed() -> discord.Embed:
         inline=False,
     )
     embed.add_field(
-        name="💬 Feedback",
+        name="Feedback",
         value=(
-            f"Questions, bugs, or suggestions? Contact **{FEEDBACK_DISCORD_USERNAME}** on Discord."
+            f"Questions, bugs, or suggestions? Join our [Discord](https://discord.gg/r5khc9TN)!."
         ),
         inline=False,
     )
