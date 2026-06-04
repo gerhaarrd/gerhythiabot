@@ -20,7 +20,10 @@ class RhythiaBot(commands.Bot):
         intents = discord.Intents.default()
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.settings = settings
-        self.linked_accounts = LinkedAccountStore()
+        # Create a shared ThreadPoolExecutor for DB workers and pass to store
+        from concurrent.futures import ThreadPoolExecutor
+        self._db_executor = ThreadPoolExecutor(max_workers=8)
+        self.linked_accounts = LinkedAccountStore(executor=self._db_executor)
         deleted = self.linked_accounts.cleanup_expired_pending()
         if deleted:
             pass

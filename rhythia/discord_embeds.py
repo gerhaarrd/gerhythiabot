@@ -9,6 +9,7 @@ import logging
 
 from rhythia.constants import FEEDBACK_DISCORD_USERNAME
 from rhythia.site_urls import beatmap_page_url, leaderboard_page_url, user_profile_url
+from rhythia.linked_accounts import LinkedAccountStore
 
 beatmap_url = beatmap_page_url
 leaderboard_url = leaderboard_page_url
@@ -284,8 +285,14 @@ def profile_embed(
         status_parts.append("🟢 Online")
     else:
         status_parts.append("⚫ Offline")
-    if user.get("verified"):
-        status_parts.append("✅ Verified")
+    # Show linked status from local DB instead of Rhythia's public `verified` flag
+    try:
+        store = LinkedAccountStore()
+        linked = store.get_by_rhythia_user_id(int(user.get("id") or 0))
+    except Exception:
+        linked = None
+    if linked is not None:
+        status_parts.append("🔗 Linked")
     status_parts.append(str(user.get("activity_status") or "—").capitalize())
     embed.add_field(name="📡 Status", value=" · ".join(status_parts), inline=False)
 

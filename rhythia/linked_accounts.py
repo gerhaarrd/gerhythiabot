@@ -7,6 +7,10 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from collections import OrderedDict
+import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from rhythia.config import LINKED_ACCOUNTS_DB_PATH
 
@@ -33,11 +37,24 @@ class LinkedAccountStore:
     def __init__(
         self,
         db_path: Path = LINKED_ACCOUNTS_DB_PATH,
+        *,
+        executor: ThreadPoolExecutor | None = None,
     ) -> None:
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
+        # Simple in-memory LRU cache: {rhythia_user_id: LinkedAccount}
+        self._cache: OrderedDict[int, LinkedAccount] = OrderedDict()
+        self._cache_max = 1024
+        # Simple metrics
+        self.metrics = {
+            "get_by_rhythia_calls": 0,
+            "get_by_rhythia_hits": 0,
+            "get_by_rhythia_total_time_ms": 0.0,
+        }
+        # ThreadPool for offloading blocking DB calls (injectable/shared)
+        self._executor = executor or ThreadPoolExecutor(max_workers=4)
         self._init_db()
 
     # ------------------------------------------------------------------
@@ -226,6 +243,67 @@ class LinkedAccountStore:
             rhythia_username=row["rhythia_username"],
             linked_at=row["linked_at"],
         )
+
+    def get_by_rhythia_user_id(self, rhythia_user_id: int) -> LinkedAccount | None:
+        # Ensure type
+        try:
+            rid = int(rhythia_user_id)
+        except Exception:
+            return None
+
+        self.metrics["get_by_rhythia_calls"] += 1
+        start = time.perf_counter()
+
+        # Check cache first
+        cached = self._cache.get(rid)
+        if cached is not None:
+            # move to end = most recently used
+            self._cache.move_to_end(rid)
+            self.metrics["get_by_rhythia_hits"] += 1
+            elapsed = (time.perf_counter() - start) * 1000.0
+            self.metrics["get_by_rhythia_total_time_ms"] += elapsed
+            return cached
+
+        row = self._get_conn().execute(
+            "SELECT discord_id, rhythia_username, linked_at FROM links WHERE rhythia_user_id = ? LIMIT 1",
+            (rid,),
+        ).fetchone()
+        if row is None:
+            elapsed = (time.perf_counter() - start) * 1000.0
+            self.metrics["get_by_rhythia_total_time_ms"] += elapsed
+            return None
+
+        account = LinkedAccount(
+            discord_id=int(row["discord_id"]),
+            rhythia_user_id=rhythia_user_id,
+            rhythia_username=row["rhythia_username"],
+            linked_at=row["linked_at"],
+        )
+        # populate cache
+        try:
+            self._cache_put(account)
+        except Exception:
+            pass
+        elapsed = (time.perf_counter() - start) * 1000.0
+        self.metrics["get_by_rhythia_total_time_ms"] += elapsed
+        return account
+
+        # unreachable
+
+    async def get_by_rhythia_user_id_async(self, rhythia_user_id: int) -> LinkedAccount | None:
+        """Async wrapper that runs the blocking DB lookup in a thread worker."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, self.get_by_rhythia_user_id, rhythia_user_id)
+
+    def _cache_put(self, account: LinkedAccount) -> None:
+        # Insert into LRU cache, evict oldest if over size
+        key = int(account.rhythia_user_id) if account.rhythia_user_id is not None else None
+        if key is None:
+            return
+        self._cache[key] = account
+        self._cache.move_to_end(key)
+        if len(self._cache) > self._cache_max:
+            self._cache.popitem(last=False)
 
     def delete(self, discord_id: int) -> bool:
         with self._lock:
