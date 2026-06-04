@@ -33,9 +33,42 @@ class RhythiaBot(commands.Bot):
         # Create shared HTTP session for connection reuse
         self._http_session = aiohttp.ClientSession()
 
-        from bot.slash_commands import RhythiaSlashCommands
+        # Register per-category command Cogs (migration). We no longer
+        # register the legacy consolidated `RhythiaSlashCommands` Cog to
+        # avoid duplicate `gerhythia` group registration.
+        from bot.compat import RhythiaCompat
+        from commands.verify_commands import VerifyCommands
+        from commands.account_commands import AccountCommands
+        from commands.search_commands import SearchCommands
+        from commands.maps_commands import MapsCommands
+        from commands.leaderboard_commands import LeaderboardCommands
+        from commands.recent_commands import RecentCommands
+        from commands.misc_commands import MiscCommands
 
-        await self.add_cog(RhythiaSlashCommands(self))
+        # Register a single compatibility Cog that defines the shared `gerhythia`
+        # app command group. Per-category cogs attach subcommands to this group
+        # and must not recreate it.
+        await self.add_cog(RhythiaCompat(self))
+
+        # Register per-category command Cogs. These attach subcommands to the
+        # already-registered `gerhythia` group exposed by `RhythiaCompat`.
+        from discord import app_commands
+
+        for cog_cls in (
+            VerifyCommands,
+            AccountCommands,
+            SearchCommands,
+            MapsCommands,
+            LeaderboardCommands,
+            RecentCommands,
+            MiscCommands,
+        ):
+            try:
+                await self.add_cog(cog_cls(self))
+            except app_commands.errors.CommandAlreadyRegistered:
+                # Already registered elsewhere (bot restart or previously registered group).
+                # Safe to ignore and continue so startup doesn't crash.
+                pass
         self._start_presence_task()
 
         if not self.settings.sync_commands:
@@ -114,7 +147,6 @@ class RhythiaBot(commands.Bot):
         """Fetch Rhythia stats if cache is stale (older than 30 minutes)."""
         now = datetime.now()
 
-        # Only update if cache is empty or older than 30 minutes
         if self._stats_updated and (now - self._stats_updated) < timedelta(minutes=30):
             return
 

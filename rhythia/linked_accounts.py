@@ -71,12 +71,11 @@ class LinkedAccountStore:
                 discord_id TEXT PRIMARY KEY,
                 rhythia_user_id INTEGER,
                 rhythia_username TEXT NOT NULL,
-                token_encrypted TEXT,
                 linked_at TEXT NOT NULL
             )
             """
         )
-        self._migrate_token_optional()
+        # No token storage required; keep schema minimal.
         # Index on rhythia_user_id for potential future lookups
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_links_rhythia_user_id ON links (rhythia_user_id)"
@@ -95,42 +94,8 @@ class LinkedAccountStore:
         )
 
     def _migrate_token_optional(self) -> None:
-        conn = self._get_conn()
-        columns = conn.execute("PRAGMA table_info(links)").fetchall()
-        token_column = next(
-            (column for column in columns if column["name"] == "token_encrypted"),
-            None,
-        )
-        if token_column is None or not token_column["notnull"]:
-            return
-
-        with self._lock:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                conn.execute(
-                    """
-                    CREATE TABLE links_new (
-                        discord_id TEXT PRIMARY KEY,
-                        rhythia_user_id INTEGER,
-                        rhythia_username TEXT NOT NULL,
-                        token_encrypted TEXT,
-                        linked_at TEXT NOT NULL
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    INSERT INTO links_new (discord_id, rhythia_user_id, rhythia_username, token_encrypted, linked_at)
-                    SELECT discord_id, rhythia_user_id, rhythia_username, token_encrypted, linked_at
-                    FROM links
-                    """
-                )
-                conn.execute("DROP TABLE links")
-                conn.execute("ALTER TABLE links_new RENAME TO links")
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
+        # Token storage removed; no migration needed.
+        return
 
     # ------------------------------------------------------------------
     # Public API
@@ -147,15 +112,14 @@ class LinkedAccountStore:
         with self._lock:
             self._get_conn().execute(
                 """
-                INSERT INTO links (discord_id, rhythia_user_id, rhythia_username, token_encrypted, linked_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO links (discord_id, rhythia_user_id, rhythia_username, linked_at)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(discord_id) DO UPDATE SET
                     rhythia_user_id = excluded.rhythia_user_id,
                     rhythia_username = excluded.rhythia_username,
-                    token_encrypted = excluded.token_encrypted,
                     linked_at = excluded.linked_at
                 """,
-                (str(discord_id), rhythia_user_id, rhythia_username, None, linked_at),
+                (str(discord_id), rhythia_user_id, rhythia_username, linked_at),
             )
         return LinkedAccount(
             discord_id=discord_id,

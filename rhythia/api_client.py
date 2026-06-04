@@ -63,6 +63,9 @@ class RhythiaClient:
         self._session = session
         self._owns_session = session is None
         self._timeout = timeout
+        # Simple in-memory TTL cache for find_beatmap results: {key: (ts, value)}
+        self._beatmap_cache: dict[str, tuple[float, dict[str, Any]] ] = {}
+        self._beatmap_cache_ttl = 300.0  # seconds
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -116,19 +119,64 @@ class RhythiaClient:
         return await self._post("getUserScores", id=user_id)
 
     async def find_beatmap(self, query: str) -> dict[str, Any] | None:
+        # Check cache first
+        key = (query or "").strip()
+        now = __import__("time").time()
+        cached = self._beatmap_cache.get(key)
+        if cached:
+            ts, val = cached
+            if now - ts < self._beatmap_cache_ttl:
+                return val
+            else:
+                del self._beatmap_cache[key]
+        # First try the public search (enhancedSearch) which is fast for titles
         results = await self.search(query=query.strip(), limit=10)
         beatmaps = results.get("beatmaps") or []
         if not isinstance(beatmaps, list) or not beatmaps:
             return None
 
+        # If query is numeric, try to match by id from the search results
         if query.strip().isdigit():
             beatmap_id = int(query.strip())
             for beatmap in beatmaps:
                 if isinstance(beatmap, dict) and beatmap.get("id") == beatmap_id:
-                    return beatmap
+                    candidate = beatmap
+                    break
+            else:
+                candidate = None
+        else:
+            candidate = beatmaps[0] if isinstance(beatmaps[0], dict) else None
 
-        first = beatmaps[0]
-        return first if isinstance(first, dict) else None
+        if candidate is None:
+            return None
+
+        # If the candidate already contains detailed fields like playcount,
+        # return it. Otherwise try a single `getBeatmaps` call to enrich the
+        # candidate (this endpoint often includes playcount and more metadata).
+        has_playcount = "playcount" in candidate or "playCount" in candidate or "play_count" in candidate
+        if has_playcount:
+            return candidate
+
+        try:
+            # Query getBeatmaps by title to find a richer representation.
+            title = candidate.get("title") or query
+            beatmaps_page = await self.get_beatmaps(page=1, query=title)
+            candidates = beatmaps_page.get("beatmaps") or []
+            for c in candidates:
+                if not isinstance(c, dict):
+                    continue
+                if c.get("id") == candidate.get("id") or (c.get("title") or "") == (candidate.get("title") or ""):
+                    # Merge c into candidate, preferring values from c when present
+                    merged = {**candidate, **c}
+                    self._beatmap_cache[key] = (now, merged)
+                    return merged
+        except Exception:
+            # If enrichment fails, just return the original candidate
+            self._beatmap_cache[key] = (now, candidate)
+            return candidate
+
+        self._beatmap_cache[key] = (now, candidate)
+        return candidate
 
     async def get_beatmaps(
         self,

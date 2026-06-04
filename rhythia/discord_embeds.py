@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import discord
+import logging
 
 from rhythia.constants import FEEDBACK_DISCORD_USERNAME
 from rhythia.site_urls import beatmap_page_url, leaderboard_page_url, user_profile_url
@@ -19,6 +20,93 @@ EMBED_COLOR_MAPS = 0x3B82F6        # Bright Blue
 EMBED_COLOR_SEARCH = 0x10B981      # Emerald Green
 EMBED_COLOR_HELP = 0xEC4899        # Neon Pink
 EMBED_COLOR_SCORE = 0xF97316       # Orange
+EMBED_COLOR_DARK = 0x0F172A        # Dark (for Tasukete)
+EMBED_COLOR_LOGIC = 0x8B5CF6       # Purple (for Logic)
+EMBED_COLOR_EASY = 0x10B981        # Green
+EMBED_COLOR_MEDIUM = 0xFBBF24      # Yellow
+EMBED_COLOR_HARD = 0xEF4444        # Red
+
+
+def difficulty_to_color(difficulty: Any = None, *, star: Any = None) -> int:
+    # If difficulty is a numeric code (1..5) map directly
+    try:
+        if isinstance(difficulty, (int, float)):
+            d = int(difficulty)
+            if d == 5:
+                return EMBED_COLOR_DARK
+            if d == 4:
+                return EMBED_COLOR_LOGIC
+            if d == 3:
+                return EMBED_COLOR_HARD
+            if d == 2:
+                return EMBED_COLOR_MEDIUM
+            if d == 1:
+                return EMBED_COLOR_EASY
+    except Exception:
+        pass
+
+    # If difficulty is a string, match keywords
+    if isinstance(difficulty, str):
+        v = difficulty.strip().lower()
+        if "tasuk" in v:
+            return EMBED_COLOR_DARK
+        if "logic" in v:
+            return EMBED_COLOR_LOGIC
+        if "hard" in v:
+            return EMBED_COLOR_HARD
+        if "medium" in v or "normal" in v:
+            return EMBED_COLOR_MEDIUM
+        if "easy" in v:
+            return EMBED_COLOR_EASY
+
+    # Fallback to starRating if provided
+    if isinstance(star, (int, float)):
+        try:
+            f = float(star)
+        except Exception:
+            return EMBED_COLOR_MAPS
+        if f < 2.0:
+            return EMBED_COLOR_EASY
+        if f < 4.0:
+            return EMBED_COLOR_MEDIUM
+        return EMBED_COLOR_HARD
+
+    return EMBED_COLOR_MAPS
+
+
+def difficulty_to_name(difficulty: Any) -> str | None:
+    """Map numeric difficulty codes to human names per project convention.
+
+    5 -> tasukete, 4 -> logic, 3 -> hard, 2 -> medium, 1 -> easy
+    """
+    try:
+        if isinstance(difficulty, (int, float)):
+            d = int(difficulty)
+            if d == 5:
+                return "tasukete"
+            if d == 4:
+                return "logic"
+            if d == 3:
+                return "hard"
+            if d == 2:
+                return "medium"
+            if d == 1:
+                return "easy"
+    except Exception:
+        pass
+    if isinstance(difficulty, str):
+        v = difficulty.strip().lower()
+        if v in {"tasukete", "tasuk", "tasuke"}:
+            return "tasukete"
+        if "logic" in v:
+            return "logic"
+        if "hard" in v:
+            return "hard"
+        if "medium" in v or "normal" in v:
+            return "medium"
+        if "easy" in v:
+            return "easy"
+    return None
 
 
 def flag_emoji(country_code: str | None) -> str:
@@ -319,6 +407,9 @@ def beatmaps_embed(
         bm_id = bm.get("id", "?")
         stars = bm.get("starRating")
         stars_text = f"{stars:.2f}★" if isinstance(stars, (int, float)) else "—"
+        diff_val = bm.get("difficulty") or bm.get("diffName") or bm.get("starRating")
+        diff_name = difficulty_to_name(diff_val)
+        diff_text = f"{diff_name.capitalize()}" if diff_name else "—"
         title = _truncate(bm.get("title") or "?", 55)
         mapper = bm.get("ownerUsername", "?")
         status = bm.get("status", "—")
@@ -331,14 +422,20 @@ def beatmaps_embed(
         
         lines.append(
             f"**[{title}]({link})**\n"
-            f"> 🎫 `#{bm_id}`  |  ⭐ **{stars_text}**  |  🏷️ **{status}**  |  👤 {mapper_part}"
+            f"> 🎫 `#{bm_id}`  |  ⭐ **{stars_text}**  |  🎚️ **{diff_text}**  |  🏷️ **{status}**  |  👤 {mapper_part}"
         )
+
+    # If first beatmap has difficulty info, use it for embed color
+    list_color = EMBED_COLOR_MAPS
+    if beatmaps:
+        first = beatmaps[0]
+        list_color = difficulty_to_color(first.get("difficulty") or first.get("diffName") or first.get("starRating"), star=first.get("starRating"))
 
     embed = discord.Embed(
         title="🎵 Beatmaps",
         url="https://rhythia.com/maps",
         description="\n\n".join(lines) if lines else "_No maps found._",
-        color=EMBED_COLOR_MAPS,
+        color=list_color,
     )
     if filters_label:
         embed.set_footer(text=_paginated_footer(
@@ -365,13 +462,15 @@ def beatmap_embed(beatmap: dict[str, Any]) -> discord.Embed:
     stars_text = f"{stars:.2f}★" if isinstance(stars, (int, float)) else "—"
     status = beatmap.get("status") or "—"
     length = _duration_ms(beatmap.get("length"))
-    playcount = _num(beatmap.get("playcount"))
+    playcount = beatmap.get("playcount")
+    playcount = _num(playcount) if playcount is not None else "—"
     map_url = beatmap_url(bm_id) if bm_id else "https://rhythia.com/maps"
 
+    color = difficulty_to_color(beatmap.get("difficulty") or beatmap.get("diffName") or beatmap.get("beatmapDifficulty"), star=stars)
     embed = discord.Embed(
         title=_truncate(title, 256),
         url=map_url,
-        color=EMBED_COLOR_MAPS,
+        color=color,
     )
     image = _asset_url(beatmap.get("image"))
     if image:
@@ -384,6 +483,10 @@ def beatmap_embed(beatmap: dict[str, Any]) -> discord.Embed:
         f"[{mapper}]({user_url(owner_id)})" if owner_id else mapper
     )
     embed.add_field(name="Mapper", value=mapper_text, inline=True)
+    diff_val = beatmap.get("difficulty") or beatmap.get("diffName") or beatmap.get("beatmapDifficulty") or beatmap.get("starRating")
+    diff_name = difficulty_to_name(diff_val)
+    diff_display = f"**{diff_name.capitalize()}**" if diff_name else "—"
+    embed.add_field(name="Difficulty", value=diff_display, inline=True)
     embed.add_field(name="Stars", value=f"**{stars_text}**", inline=True)
     embed.add_field(name="Status", value=f"**{status}**", inline=True)
     embed.add_field(name="Length", value=length, inline=True)
@@ -401,7 +504,7 @@ def beatmap_embed(beatmap: dict[str, Any]) -> discord.Embed:
     return embed
 
 
-def recent_score_embed(score: dict[str, Any], *, username: str) -> discord.Embed:
+def recent_score_embed(score: dict[str, Any], *, username: str, stars_override: Any = None) -> discord.Embed:
     title = score.get("beatmapTitle") or score.get("songId") or "Unknown beatmap"
     score_id = score.get("id")
     awarded = score.get("awarded_sp")
@@ -416,15 +519,27 @@ def recent_score_embed(score: dict[str, Any], *, username: str) -> discord.Embed
     embed = discord.Embed(
         title=_truncate(f"{username}'s recent score", 256),
         description=f"**{_truncate(str(title), 180)}**",
-        color=EMBED_COLOR_SCORE,
+        color=difficulty_to_color(stars, star=stars),
         url=replay_url or None,
     )
     embed.add_field(name="SP", value=f"**{_num(awarded)}**", inline=True)
-    embed.add_field(
-        name="Difficulty",
-        value=f"**{_num(stars, decimals=2)}★**" if stars is not None else "—",
-        inline=True,
-    )
+    # Show difficulty name when difficulty is the numeric code (1..5),
+    # otherwise show star rating if available.
+    diff_name = difficulty_to_name(stars)
+    if diff_name:
+        diff_value = f"**{diff_name.capitalize()}**"
+    else:
+        diff_value = f"**{_num(stars, decimals=2)}★**" if stars is not None else "—"
+    embed.add_field(name="Difficulty", value=diff_value, inline=True)
+
+    # If an explicit star value was provided (from beatmap lookup), show it
+    # next to Difficulty in its own inline field.
+    if stars_override is not None:
+        try:
+            star_text = f"**{float(stars_override):.2f}★**"
+        except Exception:
+            star_text = _num(stars_override)
+        embed.add_field(name="Stars", value=star_text, inline=True)
     embed.add_field(name="Misses", value=_num(misses), inline=True)
     embed.add_field(name="Notes", value=_num(notes), inline=True)
     embed.add_field(

@@ -1,0 +1,88 @@
+"""Map browsing and beatmap commands."""
+from __future__ import annotations
+
+from typing import Callable, Awaitable, Any
+import asyncio
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from rhythia.api_client import RhythiaClient
+from rhythia.api_errors import RhythiaAPIError
+from rhythia.discord_embeds import beatmaps_embed, beatmap_embed
+from utils.helpers import _beatmap_image_file
+
+
+from bot.compat import RhythiaCompat
+
+
+class MapsCommands(RhythiaCompat):
+    rhythia = RhythiaCompat.rhythia
+
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+
+    @rhythia.command(name="maps", description="Browse and filter beatmaps (10 maps per page)")
+    @app_commands.checks.cooldown(5, 30.0)
+    @app_commands.describe(title="Text in map title", mapper="Mapper username", status="Map status", min_stars="Minimum star rating", max_stars="Maximum star rating")
+    @app_commands.choices(status=[app_commands.Choice(name=label, value=value) for label, value in []])
+    async def maps(self, interaction: discord.Interaction, title: str | None = None, mapper: str | None = None, status: app_commands.Choice[str] | None = None, min_stars: app_commands.Range[float, 0, 20] = 0, max_stars: app_commands.Range[float, 0, 20] = 20) -> None:
+        MAPS_LIMIT = 10
+        if min_stars > max_stars:
+            await interaction.response.send_message("Minimum stars cannot be greater than maximum.", ephemeral=True)
+            return
+        status_val = status.value if status else ""
+        query = (title or "").strip()
+        author = (mapper or "").strip()
+        label = f"{query} · {author}"
+        await self._reply_with_navigable_embed(interaction, fetch=lambda c, p: c.get_beatmaps(page=p, query=query, author=author, status=status_val, min_stars=min_stars, max_stars=max_stars), build=lambda d, up=1: beatmaps_embed(d, up, limit=MAPS_LIMIT, filters_label=label), page_size=MAPS_LIMIT)
+
+    @rhythia.command(name="beatmap", description="Show one beatmap by id or title")
+    @app_commands.checks.cooldown(5, 30.0)
+    @app_commands.describe(query="Beatmap id or title")
+    async def beatmap(self, interaction: discord.Interaction, query: app_commands.Range[str, 1, 120]) -> None:
+        await interaction.response.defer(thinking=True)
+        client = self.bot.client_for()
+        try:
+            beatmap = await client.find_beatmap(query)
+            # `find_beatmap` performs enrichment and caching; rely on it.
+            if not beatmap:
+                await interaction.followup.send(f"No beatmap found for **{query}**.", ephemeral=True)
+                return
+            embed = beatmap_embed(beatmap)
+            image_task = asyncio.create_task(_beatmap_image_file(beatmap, session=self.bot._http_session))
+            image_file = await image_task
+            if image_file:
+                embed.set_image(url=f"attachment://{image_file.filename}")
+                await interaction.followup.send(embed=embed, file=image_file)
+            else:
+                await interaction.followup.send(embed=embed)
+        except RhythiaAPIError as exc:
+            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+
+    async def _reply_with_navigable_embed(self, interaction: discord.Interaction, *, fetch: Callable[[RhythiaClient, int], Awaitable[dict[str, Any]]], build: Callable[[dict[str, Any], int], discord.Embed], initial_user_page: int = 1, page_size: int | None = None) -> None:
+        from bot.embed_navigator import API_PAGE_SIZE, EmbedNavigatorView
+        if interaction.user is None:
+            return
+        client = self.bot.client_for()
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(thinking=True)
+            except discord.NotFound:
+                return
+        try:
+            actual_page_size = page_size or API_PAGE_SIZE
+            first_item_index = (initial_user_page - 1) * actual_page_size
+            api_page = (first_item_index // 50) + 1
+            data = await fetch(client, api_page)
+            total = data.get("total", 0)
+            per_page = actual_page_size
+            max_pages = (total + per_page - 1) // per_page if total > 0 else 1
+            embed = build(data, initial_user_page)
+            view = EmbedNavigatorView(interaction, fetch=fetch, build=build, initial_data=data, initial_user_page=initial_user_page, max_pages=max_pages, page_size=page_size)
+            await interaction.followup.send(embed=embed, view=view)
+        except RhythiaAPIError as exc:
+            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+        except Exception:
+            await interaction.followup.send("Internal error.", ephemeral=True)
