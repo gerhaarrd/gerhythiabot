@@ -23,12 +23,8 @@ def load_env_file() -> None:
 
     if ENV_FILE.is_file():
         load_dotenv(ENV_FILE)
-        logger.info("Loaded %s", ENV_FILE.name)
     else:
-        logger.warning(
-            "No %s found - set DISCORD_TOKEN in environment variables.",
-            ENV_FILE.name,
-        )
+        pass
     _dotenv_loaded = True
 
 

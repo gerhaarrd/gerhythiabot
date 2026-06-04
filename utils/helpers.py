@@ -27,7 +27,6 @@ async def country_autocomplete(
                 break
         return choices
     except discord.NotFound:
-        logger.warning("Autocomplete interaction expired (user_id=%s)", interaction.user.id if interaction.user else "unknown")
         return []
 
 

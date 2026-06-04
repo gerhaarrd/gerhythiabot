@@ -47,7 +47,6 @@ class LeaderboardCommands(RhythiaCompat):
             try:
                 await interaction.response.defer(thinking=True)
             except discord.NotFound:
-                logger.warning("Interaction expired (discord=%s)", interaction.user.id)
                 return
 
         user_position: int | None = None
@@ -97,8 +96,6 @@ class LeaderboardCommands(RhythiaCompat):
             view = EmbedNavigatorView(interaction, fetch=fetch, build=build, initial_data=data, initial_user_page=initial_user_page, max_pages=max_pages, page_size=page_size)
             await interaction.followup.send(embed=embed, view=view)
         except RhythiaAPIError as exc:
-            logger.warning("API (discord=%s): %s", interaction.user.id, exc)
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
         except Exception:
-            logger.exception("Error in leaderboard command")
             await interaction.followup.send("Internal error.", ephemeral=True)

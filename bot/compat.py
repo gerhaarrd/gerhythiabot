@@ -36,17 +36,14 @@ class RhythiaCompat(commands.Cog):
             try:
                 await interaction.response.defer(thinking=True)
             except discord.NotFound:
-                logger.warning("Interaction expired (discord=%s)", interaction.user.id)
                 return
 
         try:
             data = await fetch(client)
             await interaction.followup.send(embed=build(data))
         except RhythiaAPIError as exc:
-            logger.warning("API (discord=%s): %s", interaction.user.id, exc)
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
         except Exception:
-            logger.exception("Error in command %s", interaction.command)
             await interaction.followup.send("Internal error.", ephemeral=True)
 
     async def _reply_with_navigable_embed(
@@ -67,7 +64,6 @@ class RhythiaCompat(commands.Cog):
             try:
                 await interaction.response.defer(thinking=True)
             except discord.NotFound:
-                logger.warning("Interaction expired (discord=%s)", interaction.user.id)
                 return
 
         try:
@@ -94,10 +90,8 @@ class RhythiaCompat(commands.Cog):
             )
             await interaction.followup.send(embed=embed, view=view)
         except RhythiaAPIError as exc:
-            logger.warning("API (discord=%s): %s", interaction.user.id, exc)
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
         except Exception:
-            logger.exception("Error in command %s", interaction.command)
             await interaction.followup.send("Internal error.", ephemeral=True)
 
     async def cog_app_command_error(
@@ -118,10 +112,10 @@ class RhythiaCompat(commands.Cog):
                 try:
                     await interaction.channel.send(message)
                 except Exception:
-                    logger.debug("Failed to send cooldown message to channel.")
+                    pass
             return
 
-        logger.exception("Unhandled app command error: %s", interaction.command, exc_info=error)
+        pass
         message = "Internal error."
         try:
             if interaction.response.is_done():
@@ -132,4 +126,4 @@ class RhythiaCompat(commands.Cog):
             try:
                 await interaction.channel.send(message)
             except Exception:
-                logger.debug("Failed to send error message to channel.")
+                pass

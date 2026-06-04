@@ -113,7 +113,6 @@ class RecentCommands(RhythiaCompat):
         except RhythiaAPIError as exc:
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
         except Exception as exc:
-            logger.exception("Unhandled error in recent command")
             await interaction.followup.send("Internal error.", ephemeral=True)
 
     @rhythia.command(name="suggest", description="Suggest Ranked maps based on user's top scores (10 maps per page)")
@@ -221,5 +220,4 @@ class RecentCommands(RhythiaCompat):
         except RhythiaAPIError as exc:
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
         except Exception as exc:
-            logger.exception("Unhandled error replying with navigable embed")
             await interaction.followup.send("Internal error.", ephemeral=True)

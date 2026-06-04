@@ -23,7 +23,7 @@ class RhythiaBot(commands.Bot):
         self.linked_accounts = LinkedAccountStore()
         deleted = self.linked_accounts.cleanup_expired_pending()
         if deleted:
-            logger.info("Removed %d expired pending link(s)", deleted)
+            pass
         self._presence_task: asyncio.Task[None] | None = None
         self._stats_cache: dict[str, int] = {}
         self._stats_updated: datetime | None = None
@@ -72,17 +72,14 @@ class RhythiaBot(commands.Bot):
         self._start_presence_task()
 
         if not self.settings.sync_commands:
-            logger.info("Command sync skipped (SKIP_COMMAND_SYNC=1)")
             return
 
         await self.tree.sync()
-        logger.info("Commands synced globally")
 
         if self.settings.guild_id:
             guild = discord.Object(id=self.settings.guild_id)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            logger.info("Commands also synced to guild %s for faster testing", self.settings.guild_id)
 
     async def close(self) -> None:
         if self._presence_task:
@@ -118,8 +115,8 @@ class RhythiaBot(commands.Bot):
                         name=message,
                     )
                 )
-            except discord.DiscordException as exc:
-                logger.warning("Could not update Discord presence: %s", exc)
+            except discord.DiscordException:
+                pass
             await asyncio.sleep(60)
 
     async def _get_presence_messages(self) -> list[str]:
@@ -154,9 +151,8 @@ class RhythiaBot(commands.Bot):
             stats = await self._fetch_rhythia_stats()
             self._stats_cache = stats
             self._stats_updated = now
-            logger.info("Updated Rhythia stats: %s", stats)
-        except Exception as exc:
-            logger.warning("Failed to fetch Rhythia stats: %s", exc)
+        except Exception:
+            pass
 
     async def _fetch_rhythia_stats(self) -> dict[str, int]:
         """Fetch stats from Rhythia API using the shared session."""
@@ -187,8 +183,8 @@ class RhythiaBot(commands.Bot):
                     data = await response.json()
                     if isinstance(data, dict) and "total" in data:
                         stats["beatmaps"] = data["total"]
-        except Exception as exc:
-            logger.debug("Failed to get beatmap stats: %s", exc)
+        except Exception:
+            pass
 
         try:
             async with session.post(
@@ -201,7 +197,7 @@ class RhythiaBot(commands.Bot):
                     data = await response.json()
                     if isinstance(data, dict) and "total" in data:
                         stats["players"] = data["total"]
-        except Exception as exc:
-            logger.debug("Failed to get leaderboard stats: %s", exc)
+        except Exception:
+            pass
 
         return stats

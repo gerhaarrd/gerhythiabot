@@ -23,14 +23,13 @@ async def main() -> None:
     try:
         settings = Settings.for_bot()
     except ValueError as exc:
-        logger.error("%s", exc)
         sys.exit(1)
 
     bot = RhythiaBot(settings)
 
     @bot.event
     async def on_ready() -> None:
-        logger.info("Bot ready as %s (%s)", bot.user, bot.user.id if bot.user else "?")
+        pass
 
     async with bot:
         await bot.start(settings.discord_token)
