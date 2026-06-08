@@ -118,6 +118,9 @@ class RhythiaClient:
     async def get_user_scores(self, *, user_id: int) -> dict[str, Any]:
         return await self._post("getUserScores", id=user_id)
 
+    async def get_score(self, *, score_id: int) -> dict[str, Any]:
+        return await self._post("getScore", id=score_id)
+
     async def find_beatmap(self, query: str) -> dict[str, Any] | None:
         # Check cache first
         key = (query or "").strip()
@@ -189,6 +192,7 @@ class RhythiaClient:
         min_stars: float = 0,
         max_stars: float = 20,
         creator_id: int | None = None,
+        **extra: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "page": page,
@@ -198,6 +202,7 @@ class RhythiaClient:
             "minStars": min_stars,
             "maxStars": max_stars,
             "status": status,
+            **extra,
         }
         if creator_id is not None:
             payload["creator"] = creator_id

@@ -314,3 +314,7 @@ class LinkedAccountStore:
             if cursor.rowcount > 0:
                 return True
             return False
+
+    def count(self) -> int:
+        row = self._get_conn().execute("SELECT COUNT(*) as count FROM links").fetchone()
+        return row["count"] if row else 0

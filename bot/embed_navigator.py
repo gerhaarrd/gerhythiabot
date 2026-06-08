@@ -157,3 +157,72 @@ class EmbedNavigatorView(ui.View):
                 )
             except discord.NotFound:
                 pass
+
+
+class LocalEmbedNavigatorView(ui.View):
+    """View for navigating locally paginated list of items with arrow buttons."""
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        *,
+        items: list[Any],
+        build: Callable[[list[Any], int, int], discord.Embed],
+        page_size: int = 5,
+    ) -> None:
+        super().__init__(timeout=300)
+        self.interaction = interaction
+        self.items = items
+        self.build = build
+        self.current_page = 1
+        self.page_size = page_size
+        self.max_pages = max(1, (len(items) + page_size - 1) // page_size)
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        self.prev_button.disabled = self.current_page <= 1
+        self.next_button.disabled = self.current_page >= self.max_pages
+
+    @ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
+    async def prev_button(
+        self, interaction: discord.Interaction, button: ui.Button
+    ) -> None:
+        if interaction.user is None or interaction.user.id != self.interaction.user.id:
+            await interaction.response.send_message(
+                "Only the user who started this can navigate.",
+                ephemeral=True,
+            )
+            return
+
+        if self.current_page > 1:
+            self.current_page -= 1
+            await self._update_embed(interaction)
+
+    @ui.button(label="Next ▶", style=discord.ButtonStyle.gray)
+    async def next_button(
+        self, interaction: discord.Interaction, button: ui.Button
+    ) -> None:
+        if interaction.user is None or interaction.user.id != self.interaction.user.id:
+            await interaction.response.send_message(
+                "Only the user who started this can navigate.",
+                ephemeral=True,
+            )
+            return
+
+        if self.current_page < self.max_pages:
+            self.current_page += 1
+            await self._update_embed(interaction)
+
+    async def _update_embed(self, interaction: discord.Interaction) -> None:
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            return
+
+        start = (self.current_page - 1) * self.page_size
+        end = start + self.page_size
+        page_items = self.items[start:end]
+
+        embed = self.build(page_items, self.current_page, self.max_pages)
+        self._update_buttons()
+        await interaction.edit_original_response(embed=embed, view=self)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Callable, Awaitable, Any
 import asyncio
+import random as _random
 
 import discord
 from discord import app_commands
@@ -19,15 +20,16 @@ from bot.compat import RhythiaCompat
 
 class MapsCommands(RhythiaCompat):
     rhythia = RhythiaCompat.rhythia
+    maps = app_commands.Group(name="maps", parent=rhythia, description="Browse and search beatmaps")
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @rhythia.command(name="maps", description="Browse and filter beatmaps (10 maps per page)")
+    @maps.command(name="search", description="Browse and filter beatmaps (10 maps per page)")
     @app_commands.checks.cooldown(5, 30.0)
     @app_commands.describe(title="Text in map title", mapper="Mapper username", status="Map status", min_stars="Minimum star rating", max_stars="Maximum star rating")
     @app_commands.choices(status=[app_commands.Choice(name=label, value=value) for label, value in []])
-    async def maps(self, interaction: discord.Interaction, title: str | None = None, mapper: str | None = None, status: app_commands.Choice[str] | None = None, min_stars: app_commands.Range[float, 0, 20] = 0, max_stars: app_commands.Range[float, 0, 20] = 20) -> None:
+    async def maps_search(self, interaction: discord.Interaction, title: str | None = None, mapper: str | None = None, status: app_commands.Choice[str] | None = None, min_stars: app_commands.Range[float, 0, 20] = 0, max_stars: app_commands.Range[float, 0, 20] = 20) -> None:
         MAPS_LIMIT = 10
         if min_stars > max_stars:
             await interaction.response.send_message("Minimum stars cannot be greater than maximum.", ephemeral=True)
@@ -61,6 +63,59 @@ class MapsCommands(RhythiaCompat):
         except RhythiaAPIError as exc:
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
 
+    @rhythia.command(name="random", description="Show a random beatmap from the library")
+    @app_commands.checks.cooldown(5, 30.0)
+    async def random(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        client = self.bot.client_for()
+        try:
+            # Get total beatmap count first
+            first_page = await client.get_beatmaps(page=1)
+            total = first_page.get("total") or 0
+            view_per_page = int(first_page.get("viewPerPage") or 50)
+            if total <= 0:
+                await interaction.followup.send("Could not fetch beatmaps.", ephemeral=True)
+                return
+
+            max_api_page = max(1, (total + view_per_page - 1) // view_per_page)
+            rand_page = _random.randint(1, max_api_page)
+            data = await client.get_beatmaps(page=rand_page)
+            beatmaps = data.get("beatmaps") or []
+            if not beatmaps:
+                beatmaps = first_page.get("beatmaps") or []
+            if not beatmaps:
+                await interaction.followup.send("No beatmaps found.", ephemeral=True)
+                return
+
+            beatmap = _random.choice(beatmaps)
+            embed = beatmap_embed(beatmap)
+            embed.title = f"🎲 Random Map — {embed.title}"
+
+            image_task = asyncio.create_task(_beatmap_image_file(beatmap, session=self.bot._http_session))
+            image_file = await image_task
+            if image_file:
+                embed.set_image(url=f"attachment://{image_file.filename}")
+                await interaction.followup.send(embed=embed, file=image_file)
+            else:
+                await interaction.followup.send(embed=embed)
+        except RhythiaAPIError as exc:
+            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+        except Exception:
+            await interaction.followup.send("Internal error.", ephemeral=True)
+
+    @maps.command(name="new", description="Show the most recently added beatmaps")
+    @app_commands.checks.cooldown(5, 30.0)
+    async def mapsnew(self, interaction: discord.Interaction) -> None:
+        MAPS_LIMIT = 10
+        await self._reply_with_navigable_embed(
+            interaction,
+            fetch=lambda c, p: c.get_beatmaps(page=p),
+            build=lambda d, up=1: beatmaps_embed(d, up, limit=MAPS_LIMIT, filters_label="🆕 Newest Maps"),
+            page_size=MAPS_LIMIT,
+        )
+
+
+
     async def _reply_with_navigable_embed(self, interaction: discord.Interaction, *, fetch: Callable[[RhythiaClient, int], Awaitable[dict[str, Any]]], build: Callable[[dict[str, Any], int], discord.Embed], initial_user_page: int = 1, page_size: int | None = None) -> None:
         from bot.embed_navigator import API_PAGE_SIZE, EmbedNavigatorView
         if interaction.user is None:
@@ -86,3 +141,4 @@ class MapsCommands(RhythiaCompat):
             await interaction.followup.send(f"Error: {exc}", ephemeral=True)
         except Exception:
             await interaction.followup.send("Internal error.", ephemeral=True)
+

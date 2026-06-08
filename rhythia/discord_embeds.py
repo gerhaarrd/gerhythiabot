@@ -206,13 +206,30 @@ def help_embed() -> discord.Embed:
     embed.add_field(
         name="Stats & search",
         value=(
-            "`/gerhythia profile` — Your profile (or another player’s username)\n"
+            "`/gerhythia profile` — Your profile (or another player's username)\n"
             "`/gerhythia search` — Search players & beatmaps (no link required)\n"
             "`/gerhythia leaderboard` — Skill leaderboard (optional country filter)\n"
-            "`/gerhythia maps` — Browse/filter beatmaps\n"
+            "`/gerhythia nearby` — Show players ranked near you or a target player\n"
+            "`/gerhythia milestone` — Show competitive milestones and SP/ranks needed\n"
+            "`/gerhythia maps search` — Browse/filter beatmaps\n"
+            "`/gerhythia maps new` — Show the most recently added beatmaps\n"
             "`/gerhythia beatmap` — Show one beatmap by id or title\n"
+            "`/gerhythia random` — Show a random beatmap from the library\n"
             "`/gerhythia recent` — Show a player's latest public score\n"
+            "`/gerhythia score` — Look up any score by its ID\n"
+            "`/gerhythia scores` — Full score history today (paginated)\n"
+            "`/gerhythia top` — Show a player's top 5 public scores\n"
+            "`/gerhythia compare` — Compare stats of two players side by side\n"
+            "`/gerhythia today` — Show player's activity & best score today\n"
+            "`/gerhythia stats` — Show global Rhythia statistics\n"
             "`/gerhythia suggest` — Suggest Ranked maps based on your top plays"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Utilities",
+        value=(
+            "`/gerhythia ping` — Bot latency & Rhythia API status"
         ),
         inline=False,
     )
@@ -272,11 +289,6 @@ def profile_embed(
     embed.add_field(
         name="📍 Country",
         value=f"**#{_num(user.get('country_position'))}**",
-        inline=True,
-    )
-    embed.add_field(
-        name="📊 Mu / Sigma",
-        value=f"{user.get('mu_rank', '—')} / {user.get('sigma_rank', '—')}",
         inline=True,
     )
 
