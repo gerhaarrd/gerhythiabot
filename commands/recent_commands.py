@@ -396,84 +396,44 @@ class RecentCommands(RhythiaCompat):
             usr1 = p1_data.get("user") or {}
             usr2 = p2_data.get("user") or {}
 
-            from rhythia.discord_embeds import flag_emoji
-            flag1 = flag_emoji(usr1.get("flag"))
-            flag2 = flag_emoji(usr2.get("flag"))
+            # Download avatars & flags
+            async def download_image(url: str | None) -> bytes | None:
+                if not url:
+                    return None
+                try:
+                    async with self.bot._http_session.get(url, timeout=5) as resp:
+                        if resp.status == 200:
+                            return await resp.read()
+                except Exception:
+                    pass
+                return None
+
+            c1 = usr1.get("flag")
+            c2 = usr2.get("flag")
             
-            name1 = usr1.get("username", "User 1")
-            name2 = usr2.get("username", "User 2")
-
-            sp1, sp2 = usr1.get("skill_points") or 0.0, usr2.get("skill_points") or 0.0
-            pos1, pos2 = usr1.get("position") or 999999, usr2.get("position") or 999999
-            pc1, pc2 = usr1.get("play_count") or 0, usr2.get("play_count") or 0
-
-            crown1 = "👑 "
-            crown2 = "👑 "
-
-            sp_leader1 = crown1 if sp1 > sp2 else ""
-            sp_leader2 = crown2 if sp2 > sp1 else ""
-            
-            pos_leader1 = crown1 if pos1 < pos2 else ""
-            pos_leader2 = crown2 if pos2 < pos1 else ""
-            
-            pc_leader1 = crown1 if pc1 > pc2 else ""
-            pc_leader2 = crown2 if pc2 > pc1 else ""
-
-            comp_title = translate("compare_title", lang)
-            comp_desc = translate("compare_desc", lang, flag1=flag1, name1=name1, flag2=flag2, name2=name2)
-            embed = discord.Embed(
-                title=comp_title,
-                color=0x3B82F6,
-                description=comp_desc
+            p1_avatar, p2_avatar, p1_flag, p2_flag = await asyncio.gather(
+                download_image(usr1.get("avatar_url") or usr1.get("profile_image")),
+                download_image(usr2.get("avatar_url") or usr2.get("profile_image")),
+                download_image(f"https://flagcdn.com/w80/{c1.lower()}.png" if c1 else None),
+                download_image(f"https://flagcdn.com/w80/{c2.lower()}.png" if c2 else None)
             )
 
-            from rhythia.discord_embeds import _asset_url
-            leader_user = usr1 if sp1 >= sp2 else usr2
-            avatar = leader_user.get("avatar_url") or leader_user.get("profile_image")
-            avatar_url = _asset_url(avatar)
-            if avatar_url:
-                embed.set_thumbnail(url=avatar_url)
-
-            embed.add_field(
-                name=translate("profile_rp", lang),
-                value=f"**{name1}**: {sp_leader1}{sp1:,.2f} SP\n**{name2}**: {sp_leader2}{sp2:,.2f} SP",
-                inline=True
-            )
-            embed.add_field(
-                name=translate("profile_global", lang),
-                value=f"**{name1}**: {pos_leader1}#{pos1:,}\n**{name2}**: {pos_leader2}#{pos2:,}",
-                inline=True
-            )
-            embed.add_field(
-                name=translate("profile_plays", lang),
-                value=f"**{name1}**: {pc_leader1}{pc1:,}\n**{name2}**: {pc_leader2}{pc2:,}",
-                inline=True
+            from utils.card_generator import generate_compare_card
+            loop = self.bot.loop
+            card_stream = await loop.run_in_executor(
+                None,
+                generate_compare_card,
+                p1_data,
+                p2_data,
+                p1_avatar,
+                p2_avatar,
+                p1_flag,
+                p2_flag
             )
 
-            sp_diff = sp1 - sp2
-            diff_prefix = "+" if sp_diff > 0 else ""
-            embed.add_field(
-                name="📊 SP Diff",
-                value=f"**{name1}** - **{name2}**: {diff_prefix}{sp_diff:,.2f}",
-                inline=True
-            )
-            
-            online_str1 = translate("profile_online" if usr1.get('is_online') else "profile_offline", lang)
-            online_str2 = translate("profile_online" if usr2.get('is_online') else "profile_offline", lang)
-            embed.add_field(
-                name=f"{flag1} {name1}",
-                value=f"• **Status:** {online_str1}",
-                inline=True
-            )
-            embed.add_field(
-                name=f"{flag2} {name2}",
-                value=f"• **Status:** {online_str2}",
-                inline=True
-            )
+            file = discord.File(card_stream, filename="compare.png")
+            await interaction.followup.send(file=file)
 
-            footer_text = translate("compare_footer", lang)
-            embed.set_footer(text=footer_text)
-            await interaction.followup.send(embed=embed)
         except RhythiaAPIError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
         except Exception:

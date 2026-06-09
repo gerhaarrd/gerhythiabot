@@ -118,6 +118,7 @@ class RhythiaBot(commands.Bot):
         from commands.recent_commands import RecentCommands
         from commands.misc_commands import MiscCommands
         from commands.language_commands import LanguageCommands
+        from commands.profile_card_commands import ProfileCardCommands
 
         # Register a single compatibility Cog that defines the shared `gerhythia`
         # app command group. Per-category cogs attach subcommands to this group
@@ -137,6 +138,7 @@ class RhythiaBot(commands.Bot):
             RecentCommands,
             MiscCommands,
             LanguageCommands,
+            ProfileCardCommands,
         ):
             try:
                 await self.add_cog(cog_cls(self))
