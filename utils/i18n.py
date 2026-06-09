@@ -421,7 +421,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "es": {
         "cooldown": "Este comando está en cooldown. Inténtalo de nuevo en {time:.1f} segundos.",
         "api_error": "Ocurrió un error al comunicarse con la API de Rhythia.",
-        "internal_error": "Ocurrió un erro interno al procesar el comando. Por favor, inténtelo de nuevo más tarde.",
+        "internal_error": "Ocurrió un error interno al procesar el comando. Por favor, inténtelo de nuevo más tarde.",
         "link_first": "Primero debes vincular tu nombre de usuario de Rhythia. Usa `/gerhythia link <username>`.",
         "not_found": "No se encontró ningún jugador para **{query}**.",
         "multiple_found": "Se encontraron múltiples jugadores para **{query}**. Usa un nombre de usuario más exacto.",
