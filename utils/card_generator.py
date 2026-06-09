@@ -112,6 +112,8 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
 
     user = profile_data.get("user") or {}
     username = user.get("username") or user.get("computedUsername") or "Unknown"
+    if len(username) > 16:
+        username = username[:16]
     clan = user.get("clan")
     clan_tag = f" [{clan['acronym']}]" if isinstance(clan, dict) and clan.get("acronym") else ""
     
@@ -146,7 +148,7 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
     draw.ellipse([46, 56, 50 + avatar_size + 4, 60 + avatar_size + 4], outline=(59, 130, 246, 100), width=1)
 
     # 2. Draw user identity info
-    font_title = load_font(26)
+    font_title = load_font(20) if len(username) > 12 else load_font(26)
     font_sub = load_font(13)
     font_bold = load_font(18)
     font_badge = load_font(10)
@@ -436,7 +438,11 @@ def generate_compare_card(
     c2 = (u2.get("flag") or "US").upper()
     
     # P1 Name
-    draw.text((30, 135), u1.get("username", "P1"), fill=(139, 92, 246, 255), font=font_title)
+    p1_name = u1.get("username", "P1")
+    if len(p1_name) > 16:
+        p1_name = p1_name[:16]
+    p1_font = load_font(15) if len(p1_name) > 12 else font_title
+    draw.text((30, 135), p1_name, fill=(139, 92, 246, 255), font=p1_font)
     if p1_flag:
         try:
             flg = Image.open(io.BytesIO(p1_flag)).convert("RGBA").resize((22, 14), Image.Resampling.LANCZOS)
@@ -447,7 +453,11 @@ def generate_compare_card(
         draw.text((190, 138), c1, fill=(156, 163, 175, 255), font=font_sub)
 
     # P2 Name
-    draw.text((670, 135), u2.get("username", "P2"), fill=(59, 130, 246, 255), font=font_title)
+    p2_name = u2.get("username", "P2")
+    if len(p2_name) > 16:
+        p2_name = p2_name[:16]
+    p2_font = load_font(15) if len(p2_name) > 12 else font_title
+    draw.text((670, 135), p2_name, fill=(59, 130, 246, 255), font=p2_font)
     if p2_flag:
         try:
             flg = Image.open(io.BytesIO(p2_flag)).convert("RGBA").resize((22, 14), Image.Resampling.LANCZOS)
