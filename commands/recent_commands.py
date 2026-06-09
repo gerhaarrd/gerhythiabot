@@ -442,15 +442,6 @@ class RecentCommands(RhythiaCompat):
                 value=f"**{name1}** - **{name2}**: {diff_prefix}{sp_diff:,.2f}",
                 inline=True
             )
-
-            # Linked accounts count
-            linked_count = self.bot.linked_accounts.count()
-            embed.add_field(
-                name="🔗 Linked Accounts",
-                value=f"{linked_count:,}",
-                inline=True
-            )
-
             # Add extra detail cards
             embed.add_field(
                 name=f"{flag1} {name1}",
