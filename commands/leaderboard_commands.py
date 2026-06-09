@@ -302,9 +302,9 @@ class LeaderboardCommands(RhythiaCompat):
             )
             
             sp_text = (
-                f"• **{sp_100_target:,} SP** Milestone: needs **+{sp_100_diff:.2f} SP**\n"
-                f"• **{sp_500_target:,} SP** Milestone: needs **+{sp_500_diff:.2f} SP**\n"
-                f"• **{sp_1000_target:,} SP** Milestone: needs **+{sp_1000_diff:.2f} SP**"
+                f"• **{sp_100_target:,} RP** Milestone: needs **+{sp_100_diff:.2f} SP**\n"
+                f"• **{sp_500_target:,} RP** Milestone: needs **+{sp_500_diff:.2f} SP**\n"
+                f"• **{sp_1000_target:,} RP** Milestone: needs **+{sp_1000_diff:.2f} SP**"
             )
             embed.add_field(name="✨ RP Milestones", value=sp_text, inline=False)
 

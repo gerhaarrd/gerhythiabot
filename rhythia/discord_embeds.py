@@ -293,8 +293,8 @@ def profile_embed(
     clan_text = clan.get("acronym") if isinstance(clan, dict) else "—"
 
     embed.add_field(
-        name="🏆 Skill",
-        value=f"**{_num(user.get('skill_points'), decimals=2)}** SP",
+        name="🏆 RP",
+        value=f"**{_num(user.get('skill_points'), decimals=2)}** RP",
         inline=True,
     )
     embed.add_field(
