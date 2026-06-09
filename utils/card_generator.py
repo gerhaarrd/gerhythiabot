@@ -257,7 +257,7 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
     g_rank = float(user.get("position") or 10000.0)
     c_rank = float(user.get("country_position") or 1000.0)
     
-    norm_rp = min(1.0, rp / 8000.0)
+    norm_rp = min(1.0, rp / 25000.0)
     norm_spin = min(1.0, spin_sp / 8000.0)
     norm_plays = min(1.0, plays / 1700.0)
     norm_g_rank = max(0.05, min(1.0, 1.0 - (math.log10(max(1.0, g_rank)) / 4.0) * 0.8))
@@ -528,7 +528,7 @@ def generate_compare_card(
     c_rank2 = float(u2.get("country_position") or 1000.0)
     
     p1_vals_norm = [
-        min(1.0, rp1 / 8000.0),
+        min(1.0, rp1 / 25000.0),
         min(1.0, spin1 / 8000.0),
         min(1.0, plays1 / 1700.0),
         min(1.0, hits1 / 3000000.0),
@@ -537,7 +537,7 @@ def generate_compare_card(
     ]
     
     p2_vals_norm = [
-        min(1.0, rp2 / 8000.0),
+        min(1.0, rp2 / 25000.0),
         min(1.0, spin2 / 8000.0),
         min(1.0, plays2 / 1700.0),
         min(1.0, hits2 / 3000000.0),
