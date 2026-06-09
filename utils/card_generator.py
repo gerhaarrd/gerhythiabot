@@ -178,17 +178,19 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
     priority_order = {
         "Global Moderator": 0,
         "RCT": 1,
-        "Content Creator": 2,
-        "Tester": 3,
-        "Bug Hunter": 4,
+        "Team Ranked": 2,
+        "Content Creator": 3,
+        "Tester": 4,
+        "Bug Hunter": 5,
     }
     
     sorted_badges = sorted(badges, key=lambda b: priority_order.get(b, 100))
     
     badge_colors = {
-        "Global Moderator": (239, 110, 110, 255),    # Light Red
-        "Tester": (134, 239, 172, 255),              # Light Green
+        "Global Moderator": (239, 110, 110, 255),     # Light Red
+        "Tester": (134, 239, 172, 255),               # Light Green
         "RCT": (251, 146, 60, 255),                   # Orange-Yellow
+        "Team Ranked": (251, 146, 60, 255),           # Orange-Yellow     
         "Bug Hunter": (234, 179, 8, 255),             # Strong Yellow
         "Content Creator": (168, 85, 247, 255),       # Purple
     }
