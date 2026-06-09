@@ -7,7 +7,9 @@ import math
 from typing import Any
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-FONT_PATH = "/usr/share/fonts/droid/DroidSans.ttf"
+import os
+
+FONT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts", "DroidSans.ttf")
 
 def load_font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     try:
