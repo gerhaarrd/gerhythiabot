@@ -172,7 +172,7 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
         draw.text((50, 301), f"Country: {country_code}", fill=(209, 213, 219, 255), font=font_sub)
 
     # 2b. Draw Badges as colored pill tags (Filtered to specific badges only)
-    allowed_badges = {"Global Moderator", "Tester", "RCT", "Bug Hunter", "Content Creator"}
+    allowed_badges = {"Global Moderator", "Tester", "RCT", "Bug Hunter", "Content Creator", "Team Ranked"}
     badges = [b for b in (user.get("badges") or []) if b in allowed_badges]
     
     priority_order = {
@@ -223,7 +223,7 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
         draw.rounded_rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], radius=4, fill=color)
         
         # Text color: dark gray/black for very light backgrounds (like light green/yellow) to ensure readability
-        text_color = (15, 23, 42, 255) if badge_name in {"Tester", "Bug Hunter", "RCT"} else (255, 255, 255, 255)
+        text_color = (15, 23, 42, 255) if badge_name in {"Tester", "Bug Hunter", "RCT", "Team Ranked"} else (255, 255, 255, 255)
         draw.text((badge_x + pad_x, badge_y + (badge_h - th) / 2 - 1), badge_name, fill=text_color, font=font_badge)
         
         badge_x += badge_w + 6
