@@ -419,7 +419,7 @@ class RecentCommands(RhythiaCompat):
                 embed.set_thumbnail(url=avatar_url)
 
             embed.add_field(
-                name="🏆 Skill Points (SP)",
+                name="🏆 RP",
                 value=f"**{name1}**: {sp_leader1}{sp1:,.2f} SP\n**{name2}**: {sp_leader2}{sp2:,.2f} SP",
                 inline=True
             )
@@ -453,7 +453,6 @@ class RecentCommands(RhythiaCompat):
                 value=f"• **Status:** {'🟢 Online' if usr2.get('is_online') else '⚫ Offline'}",
                 inline=True
             )
-            embed.add_field(name="\u200b", value="\u200b", inline=True) # Empty field for alignment
 
             embed.set_footer(text="rhythia.com · 👑 indicates the leader in each stat")
             await interaction.followup.send(embed=embed)

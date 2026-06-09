@@ -28,7 +28,7 @@ class LeaderboardCommands(RhythiaCompat):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @rhythia.command(name="leaderboard", description="Skill points leaderboard (10 players per page)")
+    @rhythia.command(name="leaderboard", description="RP leaderboard (10 players per page)")
     @app_commands.checks.cooldown(5, 30.0)
     @app_commands.describe(country="Country (ISO code) or Global", spin="Spin skill ranking")
     @app_commands.autocomplete(country=country_autocomplete)
@@ -306,7 +306,7 @@ class LeaderboardCommands(RhythiaCompat):
                 f"• **{sp_500_target:,} SP** Milestone: needs **+{sp_500_diff:.2f} SP**\n"
                 f"• **{sp_1000_target:,} SP** Milestone: needs **+{sp_1000_diff:.2f} SP**"
             )
-            embed.add_field(name="✨ Skill Points Milestones", value=sp_text, inline=False)
+            embed.add_field(name="✨ RP Milestones", value=sp_text, inline=False)
 
             if pos_val > 0:
                 rank_milestone_title = f"🏆 Next Rank Milestone: Top {next_rank_target}"
