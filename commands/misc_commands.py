@@ -1,6 +1,7 @@
 """Miscellaneous commands like help and link confirmation."""
 from __future__ import annotations
 
+import os
 import time
 
 import aiohttp
@@ -9,10 +10,85 @@ from discord import app_commands
 from discord.ext import commands
 
 from rhythia.api_client import BASE_URL
-from rhythia.discord_embeds import help_embed
+from rhythia.discord_embeds import (
+    help_embed,
+    help_overview_embed,
+    help_account_embed,
+    help_stats_embed,
+    help_utils_embed,
+)
 
 
 from bot.compat import RhythiaCompat
+
+
+class HelpDropdown(discord.ui.Select):
+    def __init__(self) -> None:
+        options = [
+            discord.SelectOption(
+                label="Overview",
+                description="Show help overview and welcome page",
+                emoji="📖",
+                value="overview",
+                default=True,
+            ),
+            discord.SelectOption(
+                label="Account",
+                description="Account linking and verification",
+                emoji="🔑",
+                value="account",
+            ),
+            discord.SelectOption(
+                label="Stats & Search",
+                description="Stats, search, and beatmap commands",
+                emoji="📊",
+                value="stats",
+            ),
+            discord.SelectOption(
+                label="Utilities & Feedback",
+                description="Latency, status, and feedback",
+                emoji="⚙️",
+                value="utils",
+            ),
+        ]
+        super().__init__(
+            placeholder="Choose a help category...",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        for option in self.options:
+            option.default = option.value == self.values[0]
+
+        category = self.values[0]
+        if category == "overview":
+            embed = help_overview_embed()
+        elif category == "account":
+            embed = help_account_embed()
+        elif category == "stats":
+            embed = help_stats_embed()
+        else:
+            embed = help_utils_embed()
+
+        await interaction.response.edit_message(embed=embed, view=self.view)
+
+
+class HelpView(discord.ui.View):
+    def __init__(self, user_id: int) -> None:
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.add_item(HelpDropdown())
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "Only the user who requested this help menu can use the dropdown.",
+                ephemeral=True,
+            )
+            return False
+        return True
 
 
 class MiscCommands(RhythiaCompat):
@@ -23,8 +99,11 @@ class MiscCommands(RhythiaCompat):
 
     @rhythia.command(name="help", description="Command list and feedback contact")
     async def help_command(self, interaction: discord.Interaction) -> None:
-        icon_file = discord.File("assets/icon.jpg", filename="icon.jpg")
-        await interaction.response.send_message(embed=help_embed(), file=icon_file)
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(root_dir, "assets", "icon.jpg")
+        icon_file = discord.File(icon_path, filename="icon.jpg")
+        view = HelpView(interaction.user.id)
+        await interaction.response.send_message(embed=help_embed(), file=icon_file, view=view)
 
     @rhythia.command(name="stats", description="Show global Rhythia statistics")
     async def stats(self, interaction: discord.Interaction) -> None:
@@ -58,7 +137,9 @@ class MiscCommands(RhythiaCompat):
             inline=True
         )
 
-        icon_file = discord.File("assets/icon.jpg", filename="icon.jpg")
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(root_dir, "assets", "icon.jpg")
+        icon_file = discord.File(icon_path, filename="icon.jpg")
         embed.set_thumbnail(url="attachment://icon.jpg")
         embed.set_footer(text="rhythia.com · Updated every 30 minutes")
         
@@ -149,7 +230,9 @@ class MiscCommands(RhythiaCompat):
         )
 
 
-        icon_file = discord.File("assets/icon.jpg", filename="icon.jpg")
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(root_dir, "assets", "icon.jpg")
+        icon_file = discord.File(icon_path, filename="icon.jpg")
         embed.set_thumbnail(url="attachment://icon.jpg")
         embed.set_footer(text="rhythia.com · Not an official bot")
         await interaction.followup.send(embed=embed, file=icon_file)

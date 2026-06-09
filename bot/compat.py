@@ -115,7 +115,9 @@ class RhythiaCompat(commands.Cog):
                     pass
             return
 
-        pass
+        cmd_name = interaction.command.name if interaction.command else "unknown"
+        logger.error(f"Error running command {cmd_name}: {error}", exc_info=error)
+
         message = "Internal error."
         try:
             if interaction.response.is_done():
@@ -127,3 +129,4 @@ class RhythiaCompat(commands.Cog):
                 await interaction.channel.send(message)
             except Exception:
                 pass
+

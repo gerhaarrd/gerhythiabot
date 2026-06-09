@@ -187,25 +187,40 @@ def _paginated_footer(
     return " · ".join(parts)
 
 
-def help_embed() -> discord.Embed:
+def help_overview_embed() -> discord.Embed:
     embed = discord.Embed(
         title="Rhythia Bot — Help",
-        description="Community bot for Rhythia stats and search. **Not official.**",
+        description=(
+            "Welcome to the community bot for Rhythia stats and search! **Not official.**\n\n"
+            "Please select a category from the dropdown menu below to see the available commands."
+        ),
         color=EMBED_COLOR_HELP,
     )
-    embed.add_field(
-        name="Account",
-        value=(
+    embed.set_thumbnail(url="attachment://icon.jpg")
+    embed.set_footer(text="Use /gerhythia help anytime")
+    return embed
+
+
+def help_account_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Rhythia Bot — Help (Account)",
+        description=(
             "`/gerhythia link` — Start profile ownership verification\n"
             "`/gerhythia verify` — Finish linking after adding the code to your profile\n"
             "`/gerhythia unlink` — Remove your link\n"
             "`/gerhythia account` — Show which account is linked"
         ),
-        inline=False,
+        color=EMBED_COLOR_HELP,
     )
-    embed.add_field(
-        name="Stats & search",
-        value=(
+    embed.set_thumbnail(url="attachment://icon.jpg")
+    embed.set_footer(text="Linking stores only public Rhythia profile info")
+    return embed
+
+
+def help_stats_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Rhythia Bot — Help (Stats & Search)",
+        description=(
             "`/gerhythia profile` — Your profile (or another player's username)\n"
             "`/gerhythia search` — Search players & beatmaps (no link required)\n"
             "`/gerhythia leaderboard` — Skill leaderboard (optional country filter)\n"
@@ -224,25 +239,32 @@ def help_embed() -> discord.Embed:
             "`/gerhythia stats` — Show global Rhythia statistics\n"
             "`/gerhythia suggest` — Suggest Ranked maps based on your top plays"
         ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Utilities",
-        value=(
-            "`/gerhythia ping` — Bot latency & Rhythia API status"
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Feedback",
-        value=(
-            f"Questions, bugs, or suggestions? Join our [Discord](https://discord.gg/r5khc9TN)!."
-        ),
-        inline=False,
+        color=EMBED_COLOR_HELP,
     )
     embed.set_thumbnail(url="attachment://icon.jpg")
-    embed.set_footer(text="Linking stores only public Rhythia profile info · Use /gerhythia help anytime")
+    embed.set_footer(text="rhythia.com · Browse player stats and beatmaps")
     return embed
+
+
+def help_utils_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Rhythia Bot — Help (Utilities & Feedback)",
+        description=(
+            "**Utilities**\n"
+            "`/gerhythia ping` — Bot latency & Rhythia API status\n\n"
+            "**Feedback**\n"
+            "Questions, bugs, or suggestions? Join our [Discord](https://discord.gg/r5khc9TN)!."
+        ),
+        color=EMBED_COLOR_HELP,
+    )
+    embed.set_thumbnail(url="attachment://icon.jpg")
+    embed.set_footer(text="Not an official bot · Use /gerhythia help anytime")
+    return embed
+
+
+def help_embed() -> discord.Embed:
+    return help_overview_embed()
+
 
 
 def profile_embed(
