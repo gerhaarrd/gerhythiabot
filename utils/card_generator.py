@@ -29,11 +29,12 @@ def draw_gradient_back(width: int, height: int) -> Image.Image:
         draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
     return base
 
-def draw_radar_chart(draw: ImageDraw.ImageDraw, cx: float, cy: float, max_r: float, values: list[float], labels: list[str]) -> None:
+def draw_radar_chart(card: Image.Image, cx: float, cy: float, max_r: float, values: list[float], labels: list[str]) -> None:
     """Draws a premium 5-axis radar chart with labels and a filled polygon."""
     num_axes = len(values)
     angle_step = 2 * math.pi / num_axes
     font = load_font(12)
+    draw = ImageDraw.Draw(card)
 
     # 1. Draw web circles (concentric rings)
     for r_factor in [0.25, 0.5, 0.75, 1.0]:
@@ -53,7 +54,7 @@ def draw_radar_chart(draw: ImageDraw.ImageDraw, cx: float, cy: float, max_r: flo
         y_outer = cy + max_r * math.sin(angle)
         draw.line([(cx, cy), (x_outer, y_outer)], fill=(255, 255, 255, 30), width=1)
 
-    # 3. Plot the data polygon
+    # 3. Plot the data polygon on a transparent overlay
     poly_points = []
     for i, val in enumerate(values):
         val_clamped = max(0.05, min(1.0, val)) # avoid completely flat lines
@@ -64,8 +65,12 @@ def draw_radar_chart(draw: ImageDraw.ImageDraw, cx: float, cy: float, max_r: flo
         poly_points.append((x, y))
 
     if len(poly_points) >= 3:
+        overlay = Image.new("RGBA", card.size, (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
         # Semi-transparent filled polygon
-        draw.polygon(poly_points, fill=(139, 92, 246, 100), outline=(139, 92, 246, 255))
+        overlay_draw.polygon(poly_points, fill=(139, 92, 246, 100), outline=(139, 92, 246, 255))
+        card.alpha_composite(overlay)
+        
         # Highlight points
         for pt in poly_points:
             draw.ellipse([pt[0] - 3, pt[1] - 3, pt[0] + 3, pt[1] + 3], fill=(255, 255, 255, 255), outline=(139, 92, 246, 255), width=2)
@@ -257,7 +262,7 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
     radar_values = [norm_rp, norm_spin, norm_plays, norm_g_rank, norm_c_rank]
     radar_labels = ["RP", "Spin", "Plays", "Global", "Country"]
     
-    draw_radar_chart(draw, cx=660, cy=200, max_r=100, values=radar_values, labels=radar_labels)
+    draw_radar_chart(card, cx=660, cy=200, max_r=100, values=radar_values, labels=radar_labels)
 
     # Outer decorative glow border for the entire card (Violet & Blue Style)
     draw.rounded_rectangle([4, 4, width - 5, height - 5], radius=18, outline=(139, 92, 246, 90), width=2)
@@ -271,7 +276,7 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
 
 
 def draw_compare_radar_chart(
-    draw: ImageDraw.ImageDraw, 
+    card: Image.Image,
     cx: float, 
     cy: float, 
     max_r: float, 
@@ -279,10 +284,11 @@ def draw_compare_radar_chart(
     p2_values: list[float], 
     labels: list[str]
 ) -> None:
-    """Draws a comparative radar chart showing two polygons overlaid."""
+    """Draws a comparative hexagonal radar chart showing two polygons overlaid."""
     num_axes = len(labels)
     angle_step = 2 * math.pi / num_axes
     font = load_font(12)
+    draw = ImageDraw.Draw(card)
 
     # 1. Draw web circles (concentric rings)
     for r_factor in [0.25, 0.5, 0.75, 1.0]:
@@ -302,7 +308,7 @@ def draw_compare_radar_chart(
         y_outer = cy + max_r * math.sin(angle)
         draw.line([(cx, cy), (x_outer, y_outer)], fill=(255, 255, 255, 30), width=1)
 
-    # 3. Plot Player 1 (Violet)
+    # 3. Calculate points
     p1_points = []
     for i, val in enumerate(p1_values):
         val_clamped = max(0.05, min(1.0, val))
@@ -312,12 +318,6 @@ def draw_compare_radar_chart(
         y = cy + r * math.sin(angle)
         p1_points.append((x, y))
 
-    if len(p1_points) >= 3:
-        draw.polygon(p1_points, fill=(139, 92, 246, 90), outline=(139, 92, 246, 255))
-        for pt in p1_points:
-            draw.ellipse([pt[0] - 3, pt[1] - 3, pt[0] + 3, pt[1] + 3], fill=(255, 255, 255, 255), outline=(139, 92, 246, 255), width=1)
-
-    # 4. Plot Player 2 (Blue)
     p2_points = []
     for i, val in enumerate(p2_values):
         val_clamped = max(0.05, min(1.0, val))
@@ -327,8 +327,24 @@ def draw_compare_radar_chart(
         y = cy + r * math.sin(angle)
         p2_points.append((x, y))
 
+    # 4. Draw transparent overlaid polygons on separate overlay layers to get true blending
+    if len(p1_points) >= 3:
+        overlay1 = Image.new("RGBA", card.size, (0, 0, 0, 0))
+        overlay_draw1 = ImageDraw.Draw(overlay1)
+        overlay_draw1.polygon(p1_points, fill=(139, 92, 246, 75), outline=(139, 92, 246, 200))
+        card.alpha_composite(overlay1)
+        
     if len(p2_points) >= 3:
-        draw.polygon(p2_points, fill=(59, 130, 246, 90), outline=(59, 130, 246, 255))
+        overlay2 = Image.new("RGBA", card.size, (0, 0, 0, 0))
+        overlay_draw2 = ImageDraw.Draw(overlay2)
+        overlay_draw2.polygon(p2_points, fill=(59, 130, 246, 75), outline=(59, 130, 246, 200))
+        card.alpha_composite(overlay2)
+
+    # Draw highlights (dots) on top
+    if len(p1_points) >= 3:
+        for pt in p1_points:
+            draw.ellipse([pt[0] - 3, pt[1] - 3, pt[0] + 3, pt[1] + 3], fill=(255, 255, 255, 255), outline=(139, 92, 246, 255), width=1)
+    if len(p2_points) >= 3:
         for pt in p2_points:
             draw.ellipse([pt[0] - 3, pt[1] - 3, pt[0] + 3, pt[1] + 3], fill=(255, 255, 255, 255), outline=(59, 130, 246, 255), width=1)
 
@@ -482,11 +498,12 @@ def generate_compare_card(
             w2 = len(val2) * 8
         draw.text((858 - w2, y), val2, fill=(255, 255, 255, 255), font=font_stat)
 
-    # Normalize values for comparative radar chart
+    # Normalize values for comparative hexagonal radar chart
     # P1
     rp1 = float(u1.get("skill_points") or 0.0)
     spin1 = float(u1.get("spin_skill_points") or 0.0)
     plays1 = float(u1.get("play_count") or 0.0)
+    hits1 = float(u1.get("squares_hit") or 0.0)
     g_rank1 = float(u1.get("position") or 10000.0)
     c_rank1 = float(u1.get("country_position") or 1000.0)
     
@@ -494,6 +511,7 @@ def generate_compare_card(
     rp2 = float(u2.get("skill_points") or 0.0)
     spin2 = float(u2.get("spin_skill_points") or 0.0)
     plays2 = float(u2.get("play_count") or 0.0)
+    hits2 = float(u2.get("squares_hit") or 0.0)
     g_rank2 = float(u2.get("position") or 10000.0)
     c_rank2 = float(u2.get("country_position") or 1000.0)
     
@@ -501,6 +519,7 @@ def generate_compare_card(
         min(1.0, rp1 / 8000.0),
         min(1.0, spin1 / 8000.0),
         min(1.0, plays1 / 1700.0),
+        min(1.0, hits1 / 3000000.0),
         max(0.05, min(1.0, 1.0 - (math.log10(max(1.0, g_rank1)) / 4.0) * 0.8)),
         max(0.05, min(1.0, 1.0 - (math.log10(max(1.0, c_rank1)) / 3.0) * 0.8))
     ]
@@ -509,12 +528,21 @@ def generate_compare_card(
         min(1.0, rp2 / 8000.0),
         min(1.0, spin2 / 8000.0),
         min(1.0, plays2 / 1700.0),
+        min(1.0, hits2 / 3000000.0),
         max(0.05, min(1.0, 1.0 - (math.log10(max(1.0, g_rank2)) / 4.0) * 0.8)),
         max(0.05, min(1.0, 1.0 - (math.log10(max(1.0, c_rank2)) / 3.0) * 0.8))
     ]
     
-    labels = ["RP", "Spin", "Plays", "Global", "Country"]
-    draw_compare_radar_chart(draw, cx=450, cy=220, max_r=110, p1_values=p1_vals_norm, p2_values=p2_vals_norm, labels=labels)
+    labels = ["RP", "Spin", "Plays", "Hits", "Global", "Country"]
+    draw_compare_radar_chart(
+        card, 
+        cx=450, 
+        cy=220, 
+        max_r=110, 
+        p1_values=p1_vals_norm, 
+        p2_values=p2_vals_norm, 
+        labels=labels
+    )
 
     # Outer decorative glow borders
     draw.rounded_rectangle([4, 4, width - 5, height - 5], radius=18, outline=(139, 92, 246, 90), width=2)
