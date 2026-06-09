@@ -299,7 +299,21 @@ class RecentCommands(RhythiaCompat):
                 return
 
             top_5 = top_scores[:5]
-            
+
+            # Fetch stars via beatmapHash in parallel
+            async def _fetch_stars(score_item: dict[str, Any]) -> float | None:
+                h = score_item.get("beatmapHash")
+                if not h:
+                    return score_item.get("starRating")
+                try:
+                    bm = await client.find_beatmap(h)
+                    return bm.get("starRating") if bm else score_item.get("starRating")
+                except Exception:
+                    return score_item.get("starRating")
+
+            stars_tasks = [_fetch_stars(s) for s in top_5]
+            stars_results = await asyncio.gather(*stars_tasks)
+
             # Fetch profile to get player avatar
             avatar_url = None
             try:
@@ -319,10 +333,9 @@ class RecentCommands(RhythiaCompat):
             if avatar_url:
                 embed.set_thumbnail(url=avatar_url)
 
-            for index, score in enumerate(top_5, start=1):
+            for index, (score, stars) in enumerate(zip(top_5, stars_results), start=1):
                 title = score.get("beatmapTitle") or score.get("songId") or "Unknown beatmap"
                 awarded = score.get("awarded_sp")
-                stars = score.get("beatmapDifficulty") or score.get("difficulty")
                 misses = score.get("misses")
                 speed = score.get("speed")
                 spin = score.get("spin")
@@ -331,9 +344,11 @@ class RecentCommands(RhythiaCompat):
                 mode = "Spin" if spin else "Classic"
                 speed_text = f"{speed:.2f}x" if isinstance(speed, (int, float)) else "1.00x"
                 
+                score_id = score.get("id") or "—"
+                
                 embed.add_field(
                     name=f"{index}. {title}",
-                    value=f"🏆 **{awarded:,.0f} SP** | {diff_text} | Misses: {misses} | {mode} ({speed_text})",
+                    value=f"🏆 **{awarded:,.0f} SP** | {diff_text} | Misses: {misses} | {mode} ({speed_text}) | ID: `{score_id}`",
                     inline=False
                 )
 
@@ -603,6 +618,20 @@ class RecentCommands(RhythiaCompat):
             except Exception:
                 pass
 
+            # Prefetch stars for all unique beatmap hashes in parallel
+            unique_hashes = list({s.get("beatmapHash") for s in all_scores if s.get("beatmapHash")})
+            hash_to_stars: dict[str, float | None] = {}
+            
+            async def _fetch_single_hash(h: str):
+                try:
+                    bm = await client.find_beatmap(h)
+                    hash_to_stars[h] = bm.get("starRating") if bm else None
+                except Exception:
+                    hash_to_stars[h] = None
+
+            if unique_hashes:
+                await asyncio.gather(*(_fetch_single_hash(h) for h in unique_hashes))
+
             PAGE_SIZE = 5
 
             def build_page(page_items: list[Any], page: int, max_pages: int) -> discord.Embed:
@@ -617,7 +646,12 @@ class RecentCommands(RhythiaCompat):
                 for score in page_items:
                     score_title = score.get("beatmapTitle") or score.get("songId") or "Unknown"
                     sp = score.get("awarded_sp") or 0
-                    stars = score.get("beatmapDifficulty") or score.get("difficulty")
+                    
+                    h = score.get("beatmapHash")
+                    stars = hash_to_stars.get(h) if h else score.get("starRating")
+                    if stars is None:
+                        stars = score.get("beatmapDifficulty") or score.get("difficulty")
+                    
                     misses = score.get("misses") or 0
                     speed = score.get("speed")
                     passed = score.get("passed")
