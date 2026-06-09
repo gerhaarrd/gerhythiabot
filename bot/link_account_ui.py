@@ -12,16 +12,16 @@ if TYPE_CHECKING:
     from bot.discord_bot import RhythiaBot
 
 
-def link_confirmation_embed(user: dict[str, Any]) -> discord.Embed:
+from utils.i18n import translate
+
+
+def link_confirmation_embed(user: dict[str, Any], lang: str = "en") -> discord.Embed:
     username = user.get("username") or user.get("computedUsername") or "Unknown"
     user_id = user.get("id")
     flag = flag_emoji(user.get("flag"))
     embed = discord.Embed(
-        title=f"Verify {flag} {username}?",
-        description=(
-            "To prove this profile is yours, confirm below and I will generate a code "
-            "for you to place in your Rhythia about me."
-        ),
+        title=translate("link_confirm_title", lang, flag=flag, username=username),
+        description=translate("link_confirm_desc", lang),
         url=user_url(user_id) if user_id else None,
         color=discord.Color.blurple(),
     )
@@ -30,16 +30,19 @@ def link_confirmation_embed(user: dict[str, Any]) -> discord.Embed:
         embed.set_thumbnail(url=avatar)
     embed.add_field(name="Rhythia ID", value=f"`{user_id}`", inline=True)
     embed.add_field(name="Username", value=f"**{username}**", inline=True)
-    embed.set_footer(text="No access token or private session is stored.")
+    embed.set_footer(text=translate("link_confirm_footer", lang))
     return embed
 
 
 class PublicLinkConfirmView(ui.View):
-    def __init__(self, bot: RhythiaBot, discord_id: int, user: dict[str, Any]) -> None:
+    def __init__(self, bot: RhythiaBot, discord_id: int, user: dict[str, Any], lang: str = "en") -> None:
         super().__init__(timeout=300)
         self.bot = bot
         self.discord_id = discord_id
         self.user = user
+        self.lang = lang
+        self.confirm.label = translate("btn_confirm", lang)
+        self.cancel.label = translate("btn_cancel", lang)
 
     @ui.button(label="Confirm link", style=discord.ButtonStyle.primary)
     async def confirm(
@@ -47,7 +50,7 @@ class PublicLinkConfirmView(ui.View):
     ) -> None:
         if interaction.user is None or interaction.user.id != self.discord_id:
             await interaction.response.send_message(
-                "Only the user who started this link can confirm it.",
+                translate("err_only_initiator_confirm", self.lang),
                 ephemeral=True,
             )
             return
@@ -65,11 +68,11 @@ class PublicLinkConfirmView(ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(
-            content=(
-                f"Verification started for **{pending.rhythia_username}**.\n\n"
-                "Add this code to your Rhythia **about me**:\n"
-                f"`{pending.code}`\n\n"
-                "Then run `/gerhythia verify`. This code expires in 15 minutes."
+            content=translate(
+                "verification_started",
+                self.lang,
+                username=pending.rhythia_username,
+                code=pending.code,
             ),
             embed=None,
             view=self,
@@ -81,7 +84,7 @@ class PublicLinkConfirmView(ui.View):
     ) -> None:
         if interaction.user is None or interaction.user.id != self.discord_id:
             await interaction.response.send_message(
-                "Only the user who started this link can cancel it.",
+                translate("err_only_initiator_cancel", self.lang),
                 ephemeral=True,
             )
             return
@@ -89,7 +92,7 @@ class PublicLinkConfirmView(ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(
-            content="Link cancelled.",
+            content=translate("link_cancelled", self.lang),
             embed=None,
             view=self,
         )

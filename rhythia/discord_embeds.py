@@ -172,7 +172,9 @@ def _paginated_footer(
     extra: str = "",
     user_page: int | None = None,
     user_per_page: int | None = None,
+    lang: str = "en",
 ) -> str:
+    from utils.i18n import translate
     total = int(data.get("total") or 0)
     # Use user page info if provided, otherwise fall back to API page info
     if user_page is not None:
@@ -181,89 +183,66 @@ def _paginated_footer(
     else:
         page = int(data.get("currentPage") or 1)
         per_page = int(data.get("viewPerPage") or 0)
-    parts = [f"Page {page}", f"{per_page}/page", f"{total:,} total"]
+    parts = [
+        translate("paginated_footer_page", lang, page=page),
+        translate("paginated_footer_per_page", lang, per_page=per_page),
+        translate("paginated_footer_total", lang, total=total),
+    ]
     if extra:
         parts.insert(0, extra)
     return " · ".join(parts)
 
 
-def help_overview_embed() -> discord.Embed:
+def help_overview_embed(lang: str = "en") -> discord.Embed:
+    from utils.i18n import translate
     embed = discord.Embed(
-        title="Rhythia Bot — Help",
-        description=(
-            "Welcome to the community bot for Rhythia stats and search! **Not official.**\n\n"
-            "Please select a category from the dropdown menu below to see the available commands."
-        ),
+        title=translate("help_overview_title", lang),
+        description=translate("help_overview_desc", lang),
         color=EMBED_COLOR_HELP,
     )
     embed.set_thumbnail(url="attachment://icon.jpg")
-    embed.set_footer(text="Use /gerhythia help anytime")
+    embed.set_footer(text=translate("help_overview_footer", lang))
     return embed
 
 
-def help_account_embed() -> discord.Embed:
+def help_account_embed(lang: str = "en") -> discord.Embed:
+    from utils.i18n import translate
     embed = discord.Embed(
-        title="Rhythia Bot — Help (Account)",
-        description=(
-            "`/gerhythia link` — Start profile ownership verification\n"
-            "`/gerhythia verify` — Finish linking after adding the code to your profile\n"
-            "`/gerhythia unlink` — Remove your link\n"
-            "`/gerhythia account` — Show which account is linked"
-        ),
+        title=translate("help_account_title", lang),
+        description=translate("help_account_desc", lang),
         color=EMBED_COLOR_HELP,
     )
     embed.set_thumbnail(url="attachment://icon.jpg")
-    embed.set_footer(text="Linking stores only public Rhythia profile info")
+    embed.set_footer(text=translate("help_account_footer", lang))
     return embed
 
 
-def help_stats_embed() -> discord.Embed:
+def help_stats_embed(lang: str = "en") -> discord.Embed:
+    from utils.i18n import translate
     embed = discord.Embed(
-        title="Rhythia Bot — Help (Stats & Search)",
-        description=(
-            "`/gerhythia profile` — Your profile (or another player's username)\n"
-            "`/gerhythia search` — Search players & beatmaps (no link required)\n"
-            "`/gerhythia leaderboard` — Skill leaderboard (optional country filter)\n"
-            "`/gerhythia nearby` — Show players ranked near you or a target player\n"
-            "`/gerhythia milestone` — Show competitive milestones and SP/ranks needed\n"
-            "`/gerhythia maps search` — Browse/filter beatmaps\n"
-            "`/gerhythia maps new` — Show the most recently added beatmaps\n"
-            "`/gerhythia beatmap` — Show one beatmap by id or title\n"
-            "`/gerhythia random` — Show a random beatmap from the library\n"
-            "`/gerhythia recent` — Show a player's latest public score\n"
-            "`/gerhythia score` — Look up any score by its ID\n"
-            "`/gerhythia scores` — Full score history today (paginated)\n"
-            "`/gerhythia top` — Show a player's top 5 public scores\n"
-            "`/gerhythia compare` — Compare stats of two players side by side\n"
-            "`/gerhythia today` — Show player's activity & best score today\n"
-            "`/gerhythia stats` — Show global Rhythia statistics\n"
-            "`/gerhythia suggest` — Suggest Ranked maps based on your top plays"
-        ),
+        title=translate("help_stats_title", lang),
+        description=translate("help_stats_desc", lang),
         color=EMBED_COLOR_HELP,
     )
     embed.set_thumbnail(url="attachment://icon.jpg")
-    embed.set_footer(text="rhythia.com · Browse player stats and beatmaps")
+    embed.set_footer(text=translate("help_stats_footer", lang))
     return embed
 
 
-def help_utils_embed() -> discord.Embed:
+def help_utils_embed(lang: str = "en") -> discord.Embed:
+    from utils.i18n import translate
     embed = discord.Embed(
-        title="Rhythia Bot — Help (Utilities & Feedback)",
-        description=(
-            "**Utilities**\n"
-            "`/gerhythia ping` — Bot latency & Rhythia API status\n\n"
-            "**Feedback**\n"
-            "Questions, bugs, or suggestions? Join our [Discord](https://discord.gg/r5khc9TN)!."
-        ),
+        title=translate("help_utils_title", lang),
+        description=translate("help_utils_desc", lang),
         color=EMBED_COLOR_HELP,
     )
     embed.set_thumbnail(url="attachment://icon.jpg")
-    embed.set_footer(text="Not an official bot · Use /gerhythia help anytime")
+    embed.set_footer(text=translate("help_utils_footer", lang))
     return embed
 
 
-def help_embed() -> discord.Embed:
-    return help_overview_embed()
+def help_embed(lang: str = "en") -> discord.Embed:
+    return help_overview_embed(lang)
 
 
 
@@ -271,7 +250,10 @@ def profile_embed(
     data: dict[str, Any],
     *,
     title_prefix: str = "",
+    lang: str = "en",
 ) -> discord.Embed:
+    from utils.i18n import translate
+
     user = data.get("user") or {}
     username = user.get("username") or user.get("computedUsername") or "Unknown"
     user_id = user.get("id")
@@ -293,32 +275,32 @@ def profile_embed(
     clan_text = clan.get("acronym") if isinstance(clan, dict) else "—"
 
     embed.add_field(
-        name="🏆 RP",
+        name=translate("profile_rp", lang),
         value=f"**{_num(user.get('skill_points'), decimals=2)}** RP",
         inline=True,
     )
     embed.add_field(
-        name="🌀 Spin",
+        name=translate("profile_spin", lang),
         value=f"**{_num(user.get('spin_skill_points'), decimals=2)}** SP",
         inline=True,
     )
-    embed.add_field(name="🎮 Plays", value=_num(user.get("play_count")), inline=True)
+    embed.add_field(name=translate("profile_plays", lang), value=_num(user.get("play_count")), inline=True)
     embed.add_field(
-        name="🌍 Global",
+        name=translate("profile_global", lang),
         value=f"**#{_num(user.get('position'))}**",
         inline=True,
     )
     embed.add_field(
-        name="📍 Country",
+        name=translate("profile_country", lang),
         value=f"**#{_num(user.get('country_position'))}**",
         inline=True,
     )
 
     status_parts: list[str] = []
     if user.get("is_online"):
-        status_parts.append("🟢 Online")
+        status_parts.append(translate("profile_online", lang))
     else:
-        status_parts.append("⚫ Offline")
+        status_parts.append(translate("profile_offline", lang))
     # Show linked status from local DB instead of Rhythia's public `verified` flag
     try:
         store = LinkedAccountStore()
@@ -326,9 +308,9 @@ def profile_embed(
     except Exception:
         linked = None
     if linked is not None:
-        status_parts.append("🔗 Linked")
+        status_parts.append(translate("profile_linked", lang))
     status_parts.append(str(user.get("activity_status") or "—").capitalize())
-    embed.add_field(name="📡 Status", value=" · ".join(status_parts), inline=False)
+    embed.add_field(name=translate("profile_status", lang), value=" · ".join(status_parts), inline=False)
 
     if clan_text != "—":
         embed.add_field(name="Clan", value=clan_text, inline=True)
@@ -345,7 +327,9 @@ def leaderboard_embed(
     country: str | None = None,
     spin: bool = False,
     user_position: int | None = None,
+    lang: str = "en",
 ) -> discord.Embed:
+    from utils.i18n import translate
     entries = data.get("leaderboard") or []
     # Use user_page to calculate ranks and slice the correct portion
     if user_page is not None:
@@ -365,7 +349,7 @@ def leaderboard_embed(
     if country:
         filter_bits.append(f"{flag_emoji(country)} {country.upper()}")
     else:
-        filter_bits.append("🌍 Global")
+        filter_bits.append(translate("profile_global", lang))
     if spin:
         filter_bits.append("Spin")
 
@@ -394,14 +378,14 @@ def leaderboard_embed(
 
         lines.append(f"{rank_str} {flag} {name} — **{skill}** SP{clan}")
 
-    title = "🏆 Rhythia Leaderboard"
+    title = translate("leaderboard_title", lang)
     if country:
         title += f" · {country.upper()}"
 
     embed = discord.Embed(
         title=title,
         url=leaderboard_url(country=country),
-        description="\n".join(lines) if lines else "_No players on this page._",
+        description="\n".join(lines) if lines else translate("leaderboard_empty", lang),
         color=EMBED_COLOR_LEADERBOARD,
     )
 
@@ -412,7 +396,7 @@ def leaderboard_embed(
         try:
             pos_int = int(raw_position)
             if pos_int > 0:
-                embed.add_field(name="Your rank", value=f"**#{pos_int:,}**", inline=False)
+                embed.add_field(name=translate("leaderboard_your_rank", lang), value=f"**#{pos_int:,}**", inline=False)
         except (TypeError, ValueError):
             # If position isn't an int, skip showing it
             pass
@@ -422,6 +406,7 @@ def leaderboard_embed(
         extra=" · ".join(filter_bits),
         user_page=user_page,
         user_per_page=limit,
+        lang=lang,
     ))
     return embed
 
@@ -432,7 +417,9 @@ def beatmaps_embed(
     *,
     limit: int = 10,
     filters_label: str = "",
+    lang: str = "en",
 ) -> discord.Embed:
+    from utils.i18n import translate
     beatmaps = data.get("beatmaps") or []
 
     # Slice the correct portion of beatmaps based on user_page
@@ -473,9 +460,9 @@ def beatmaps_embed(
         list_color = difficulty_to_color(first.get("difficulty") or first.get("diffName") or first.get("starRating"), star=first.get("starRating"))
 
     embed = discord.Embed(
-        title="🎵 Beatmaps",
+        title=translate("maps_title", lang),
         url="https://rhythia.com/maps",
-        description="\n\n".join(lines) if lines else "_No maps found._",
+        description="\n\n".join(lines) if lines else translate("maps_empty", lang),
         color=list_color,
     )
     if filters_label:
@@ -484,17 +471,20 @@ def beatmaps_embed(
             extra=filters_label,
             user_page=user_page,
             user_per_page=limit,
+            lang=lang,
         ))
     else:
         embed.set_footer(text=_paginated_footer(
             data,
             user_page=user_page,
             user_per_page=limit,
+            lang=lang,
         ))
     return embed
 
 
-def beatmap_embed(beatmap: dict[str, Any]) -> discord.Embed:
+def beatmap_embed(beatmap: dict[str, Any], lang: str = "en") -> discord.Embed:
+    from utils.i18n import translate
     bm_id = beatmap.get("id")
     title = beatmap.get("title") or "Unknown beatmap"
     mapper = beatmap.get("ownerUsername") or "Unknown mapper"
@@ -523,29 +513,30 @@ def beatmap_embed(beatmap: dict[str, Any]) -> discord.Embed:
     mapper_text = (
         f"[{mapper}]({user_url(owner_id)})" if owner_id else mapper
     )
-    embed.add_field(name="Mapper", value=mapper_text, inline=True)
+    embed.add_field(name=translate("beatmap_mapper", lang), value=mapper_text, inline=True)
     diff_val = beatmap.get("difficulty") or beatmap.get("diffName") or beatmap.get("beatmapDifficulty") or beatmap.get("starRating")
     diff_name = difficulty_to_name(diff_val)
     diff_display = f"**{diff_name.capitalize()}**" if diff_name else "—"
-    embed.add_field(name="Difficulty", value=diff_display, inline=True)
-    embed.add_field(name="Stars", value=f"**{stars_text}**", inline=True)
-    embed.add_field(name="Status", value=f"**{status}**", inline=True)
-    embed.add_field(name="Length", value=length, inline=True)
-    embed.add_field(name="Playcount", value=playcount, inline=True)
-    embed.add_field(name="ID", value=f"`{bm_id}`", inline=True)
+    embed.add_field(name=translate("beatmap_difficulty", lang), value=diff_display, inline=True)
+    embed.add_field(name=translate("beatmap_stars", lang), value=f"**{stars_text}**", inline=True)
+    embed.add_field(name=translate("beatmap_status", lang), value=f"**{status}**", inline=True)
+    embed.add_field(name=translate("beatmap_length", lang), value=length, inline=True)
+    embed.add_field(name=translate("beatmap_playcount", lang), value=playcount, inline=True)
+    embed.add_field(name=translate("beatmap_id", lang), value=f"`{bm_id}`", inline=True)
 
     description = beatmap.get("description")
     if description:
         embed.description = _truncate(str(description), 500)
     tags = beatmap.get("tags")
     if tags:
-        embed.add_field(name="Tags", value=_truncate(str(tags), 512), inline=False)
+        embed.add_field(name=translate("beatmap_tags", lang), value=_truncate(str(tags), 512), inline=False)
 
     embed.set_footer(text="rhythia.com/maps")
     return embed
 
 
-def recent_score_embed(score: dict[str, Any], *, username: str, stars_override: Any = None) -> discord.Embed:
+def recent_score_embed(score: dict[str, Any], *, username: str, stars_override: Any = None, lang: str = "en") -> discord.Embed:
+    from utils.i18n import translate
     title = score.get("beatmapTitle") or score.get("songId") or "Unknown beatmap"
     score_id = score.get("id")
     awarded = score.get("awarded_sp")
@@ -558,12 +549,12 @@ def recent_score_embed(score: dict[str, Any], *, username: str, stars_override: 
     replay_url = score.get("replay_url")
 
     embed = discord.Embed(
-        title=_truncate(f"{username}'s recent score", 256),
+        title=_truncate(translate("score_recent_title", lang, username=username), 256),
         description=f"**{_truncate(str(title), 180)}**",
         color=difficulty_to_color(stars, star=stars),
         url=replay_url or None,
     )
-    embed.add_field(name="SP", value=f"**{_num(awarded)}**", inline=True)
+    embed.add_field(name=translate("score_sp", lang), value=f"**{_num(awarded)}**", inline=True)
     # Show difficulty name when difficulty is the numeric code (1..5),
     # otherwise show star rating if available.
     diff_name = difficulty_to_name(stars)
@@ -571,7 +562,7 @@ def recent_score_embed(score: dict[str, Any], *, username: str, stars_override: 
         diff_value = f"**{diff_name.capitalize()}**"
     else:
         diff_value = f"**{_num(stars, decimals=2)}★**" if stars is not None else "—"
-    embed.add_field(name="Difficulty", value=diff_value, inline=True)
+    embed.add_field(name=translate("beatmap_difficulty", lang), value=diff_value, inline=True)
 
     # If an explicit star value was provided (from beatmap lookup), show it
     # next to Difficulty in its own inline field.
@@ -580,27 +571,27 @@ def recent_score_embed(score: dict[str, Any], *, username: str, stars_override: 
             star_text = f"**{float(stars_override):.2f}★**"
         except Exception:
             star_text = _num(stars_override)
-        embed.add_field(name="Stars", value=star_text, inline=True)
-    embed.add_field(name="Misses", value=_num(misses), inline=True)
-    embed.add_field(name="Notes", value=_num(notes), inline=True)
+        embed.add_field(name=translate("beatmap_stars", lang), value=star_text, inline=True)
+    embed.add_field(name=translate("score_misses", lang), value=_num(misses), inline=True)
+    embed.add_field(name=translate("score_notes", lang), value=_num(notes), inline=True)
     embed.add_field(
-        name="Speed",
+        name=translate("score_speed", lang),
         value=f"{float(speed):.2f}x" if isinstance(speed, (int, float)) else "—",
         inline=True,
     )
     embed.add_field(
-        name="Mode",
-        value="Spin" if spin else "Classic",
+        name=translate("score_mode", lang),
+        value=translate("score_spin" if spin else "score_classic", lang),
         inline=True,
     )
     embed.add_field(
-        name="Result",
-        value="Passed" if passed else "Failed",
+        name=translate("score_result", lang),
+        value=translate("score_passed" if passed else "score_failed", lang),
         inline=True,
     )
-    embed.add_field(name="Played", value=_score_time(score.get("created_at")), inline=True)
+    embed.add_field(name=translate("score_played", lang), value=_score_time(score.get("created_at")), inline=True)
     if replay_url:
-        embed.add_field(name="Replay", value=f"[Download]({replay_url})", inline=True)
+        embed.add_field(name=translate("score_replay", lang), value=translate("score_download", lang, url=replay_url), inline=True)
     embed.set_footer(text=f"Score ID {score_id}")
     return embed
 
@@ -611,14 +602,16 @@ def search_results_embed(
     query: str,
     limit_users: int = 8,
     limit_maps: int = 5,
+    lang: str = "en",
 ) -> discord.Embed:
+    from utils.i18n import translate
     users = data.get("users") or []
     maps = data.get("beatmaps") or []
 
     parts: list[str] = []
 
     if users:
-        parts.append("**Players**")
+        parts.append(f"**{translate('search_players', lang)}**")
         for u in users[:limit_users]:
             uid = u.get("id")
             name = u.get("username", "?")
@@ -627,7 +620,7 @@ def search_results_embed(
             parts.append(f"> {flag} [{name}]({link})  |  `ID {uid}`")
 
     if maps:
-        parts.append("\n🎵 **Beatmaps**")
+        parts.append(f"\n🎵 **{translate('search_maps', lang)}**")
         for bm in maps[:limit_maps]:
             bm_id = bm.get("id")
             title = _truncate(bm.get("title") or "?", 50)
@@ -637,15 +630,15 @@ def search_results_embed(
             parts.append(f"> [{title}]({link})  |  {stars_text}  |  `#{bm_id}`")
 
     if not parts:
-        description = f"No results for **{query}**."
+        description = translate("search_no_results", lang, query=query)
     else:
         description = "\n".join(parts)
 
     embed = discord.Embed(
-        title=f"Search: {query}",
+        title=translate("search_title", lang, query=query),
         description=_truncate(description, 4000),
         color=EMBED_COLOR_SEARCH,
         url="https://rhythia.com",
     )
-    embed.set_footer(text="Use /gerhythia profile username:… for full stats")
+    embed.set_footer(text=translate("search_footer", lang))
     return embed

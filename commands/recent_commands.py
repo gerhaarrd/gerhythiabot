@@ -32,21 +32,18 @@ class RecentCommands(RhythiaCompat):
     async def recent(self, interaction: discord.Interaction, username: str | None = None) -> None:
         if interaction.user is None:
             return
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
 
         await interaction.response.defer(thinking=True)
         client = self.bot.client_for()
         query = (username or "").strip()
 
         try:
-            # Commands may be invoked with `self` bound to the RhythiaCompat cog
-            # (see bot.compat). Prefer the per-category `RecentCommands` cog
-            # implementation when available on the bot instance.
             cog = self.bot.get_cog("RecentCommands")
             resolver = getattr(cog, "_resolve_user_for_scores", None) if cog else None
             if resolver is None or not callable(resolver):
-                # Inline fallback: replicate the resolution logic to avoid
-                # depending on a method that may not exist on `self`.
-                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str):
+                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str, lang: str = "en"):
                     if not query:
                         linked = self.bot.linked_accounts.get_account(d_id)
                         if not linked:
@@ -56,51 +53,44 @@ class RecentCommands(RhythiaCompat):
                     results = await c.search(query=query, limit=5)
                     users = results.get("users") or []
                     if not users:
-                        raise RhythiaAPIError(f"No player found for {query}.")
+                        raise RhythiaAPIError(translate("not_found", lang, query=query))
                     exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
                     if len(users) > 1 and exact is None:
-                        raise RhythiaAPIError(f"Multiple players found for {query}. Use a more exact username.")
+                        raise RhythiaAPIError(translate("multiple_found", lang, query=query))
                     user = exact or users[0]
                     return int(user["id"]), str(user.get("username") or query)
 
                 resolver = _inline_resolve
 
-            user_id, target_name = await resolver(interaction.user.id, client, query=query)
+            # Pass lang to the resolver if it supports it
+            try:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query, lang=lang)
+            except TypeError:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
             if user_id is None:
-                await interaction.followup.send("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                await interaction.followup.send(translate("link_first", lang), ephemeral=True)
                 return
 
             scores_data = await client.get_user_scores(user_id=user_id)
             recent_scores = _sorted_scores_by_created_at(scores_data.get("lastDay") or [])
             if not recent_scores:
-                await interaction.followup.send(f"**{target_name}** has no recent public scores.", ephemeral=True)
+                no_scores_msg = translate("recent_no_scores", lang, target_name=target_name)
+                await interaction.followup.send(no_scores_msg, ephemeral=True)
                 return
 
             recent_score = recent_scores[0]
-            # Defer embedding until after we may fetch the beatmap so we can
-            # include the beatmap's starRating as `Stars` next to Difficulty.
             beatmap_hash = recent_score.get("beatmapHash")
             beatmap_obj = None
             star_override = None
             if beatmap_hash:
                 try:
-                    # Parallelize beatmap enrichment and image fetch to save round trips.
-                    coro_find = client.find_beatmap(beatmap_hash)
-                    coro_image = None
-                    # We'll fetch image only after we have a beatmap object, but allow
-                    # the image fetch to run concurrently by starting it with whatever
-                    # image URL is present after enrichment. To avoid double work,
-                    # run find_beatmap first and then start image fetch concurrently
-                    # with any other awaited tasks. For simplicity, run find_beatmap
-                    # and then start image fetch concurrently with nothing else here.
-                    beatmap_obj = await coro_find
+                    beatmap_obj = await client.find_beatmap(beatmap_hash)
                     star_override = beatmap_obj.get("starRating") if beatmap_obj else None
                 except RhythiaAPIError:
                     beatmap_obj = None
 
-            embed = recent_score_embed(recent_score, username=target_name, stars_override=star_override)
-            # Start image fetch as a background task so embed building isn't
-            # blocked by network. We still await the result before sending.
+            embed = recent_score_embed(recent_score, username=target_name, stars_override=star_override, lang=lang)
             image_task = None
             if beatmap_obj:
                 image_task = asyncio.create_task(_beatmap_image_file(beatmap_obj, session=self.bot._http_session))
@@ -112,22 +102,22 @@ class RecentCommands(RhythiaCompat):
                 await interaction.followup.send(embed=embed)
 
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception as exc:
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(str(exc), ephemeral=True)
+        except Exception:
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
     @rhythia.command(name="score", description="Show a specific score by its ID")
     @app_commands.checks.cooldown(5, 30.0)
     @app_commands.describe(score_id="The numeric ID of the score to look up.")
     async def score(self, interaction: discord.Interaction, score_id: int) -> None:
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
         await interaction.response.defer(thinking=True)
         client = self.bot.client_for()
 
         try:
             data = await client.get_score(score_id=score_id)
 
-            # The API wraps the score under a string key e.g. {"1": {score_data}}.
-            # Fall back to direct dict or "score" key for safety.
             score_obj: dict[str, Any] | None = None
             if isinstance(data, dict):
                 if data.get("id"):
@@ -135,17 +125,16 @@ class RecentCommands(RhythiaCompat):
                 elif "score" in data:
                     score_obj = data["score"]
                 else:
-                    # Try the first value if all values are dicts ({"1": {...}})
                     for v in data.values():
                         if isinstance(v, dict) and v.get("id"):
                             score_obj = v
                             break
 
             if not score_obj or not score_obj.get("id"):
-                await interaction.followup.send(f"Score `{score_id}` not found.", ephemeral=True)
+                not_found_msg = translate("score_not_found", lang, score_id=score_id)
+                await interaction.followup.send(not_found_msg, ephemeral=True)
                 return
 
-            # The score has no username field — resolve it from the profile.
             user_id = score_obj.get("userId") or score_obj.get("user_id")
             username = (
                 score_obj.get("username")
@@ -165,7 +154,6 @@ class RecentCommands(RhythiaCompat):
             if not username:
                 username = f"Player {user_id or '?'}"
 
-            # Enrich with beatmap star rating if we have a hash
             beatmap_obj = None
             star_override = None
             beatmap_hash = score_obj.get("beatmapHash")
@@ -176,7 +164,7 @@ class RecentCommands(RhythiaCompat):
                 except RhythiaAPIError:
                     beatmap_obj = None
 
-            embed = recent_score_embed(score_obj, username=username, stars_override=star_override)
+            embed = recent_score_embed(score_obj, username=username, stars_override=star_override, lang=lang)
             image_task = None
             if beatmap_obj:
                 image_task = asyncio.create_task(_beatmap_image_file(beatmap_obj, session=self.bot._http_session))
@@ -188,15 +176,17 @@ class RecentCommands(RhythiaCompat):
                 await interaction.followup.send(embed=embed)
 
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception as exc:
+            await interaction.followup.send(translate("api_error", lang), ephemeral=True)
+        except Exception:
             logger.exception("Unexpected error in /gerhythia score")
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
     @rhythia.command(name="suggest", description="Suggest Ranked maps based on user's top scores (10 maps per page)")
     @app_commands.checks.cooldown(2, 60.0)
     @app_commands.describe(username="Player name (empty = linked account).")
     async def suggest(self, interaction: discord.Interaction, username: str | None = None) -> None:
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
         SUGGEST_LIMIT = 10
         if interaction.user is None:
             return
@@ -214,7 +204,7 @@ class RecentCommands(RhythiaCompat):
             cog = self.bot.get_cog("RecentCommands")
             resolver = getattr(cog, "_resolve_user_for_scores", None) if cog else None
             if resolver is None or not callable(resolver):
-                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str):
+                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str, lang: str = "en"):
                     if not query:
                         linked = self.bot.linked_accounts.get_account(d_id)
                         if not linked:
@@ -224,24 +214,29 @@ class RecentCommands(RhythiaCompat):
                     results = await c.search(query=query, limit=5)
                     users = results.get("users") or []
                     if not users:
-                        raise RhythiaAPIError(f"No player found for {query}.")
+                        raise RhythiaAPIError(translate("not_found", lang, query=query))
                     exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
                     if len(users) > 1 and exact is None:
-                        raise RhythiaAPIError(f"Multiple players found for {query}. Use a more exact username.")
+                        raise RhythiaAPIError(translate("multiple_found", lang, query=query))
                     user = exact or users[0]
                     return int(user["id"]), str(user.get("username") or query)
 
                 resolver = _inline_resolve
 
-            user_id, target_name = await resolver(interaction.user.id, client, query=query)
+            try:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query, lang=lang)
+            except TypeError:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
             if user_id is None:
-                await interaction.followup.send("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                await interaction.followup.send(translate("link_first", lang), ephemeral=True)
                 return
 
             scores_data = await client.get_user_scores(user_id=user_id)
             top_scores = scores_data.get("top") or []
             if not top_scores:
-                await interaction.followup.send(f"**{target_name}** has no top scores yet.")
+                no_top_msg = translate("suggest_no_top", lang, target_name=target_name)
+                await interaction.followup.send(no_top_msg)
                 return
 
             top_10 = top_scores[:10]
@@ -253,9 +248,9 @@ class RecentCommands(RhythiaCompat):
 
             filters_label = f"{target_name} · Avg {avg_rp:.0f} RP · {min_stars:.1f}★–{max_stars:.1f}★"
 
-            await self._reply_with_navigable_embed(interaction, fetch=lambda c, p: c.get_beatmaps(page=p, status="RANKED", min_stars=min_stars, max_stars=max_stars), build=lambda d, up=1: beatmaps_embed(d, up, limit=SUGGEST_LIMIT, filters_label=filters_label), page_size=SUGGEST_LIMIT)
+            await self._reply_with_navigable_embed(interaction, fetch=lambda c, p: c.get_beatmaps(page=p, status="RANKED", min_stars=min_stars, max_stars=max_stars), build=lambda d, up=1, l=lang: beatmaps_embed(d, up, limit=SUGGEST_LIMIT, filters_label=filters_label, lang=l), page_size=SUGGEST_LIMIT)
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+            await interaction.followup.send(str(exc), ephemeral=True)
 
     @rhythia.command(name="top", description="Show a player's top 5 public scores")
     @app_commands.checks.cooldown(5, 30.0)
@@ -263,6 +258,8 @@ class RecentCommands(RhythiaCompat):
     async def top(self, interaction: discord.Interaction, username: str | None = None) -> None:
         if interaction.user is None:
             return
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
         await interaction.response.defer(thinking=True)
         client = self.bot.client_for()
         query = (username or "").strip()
@@ -271,7 +268,7 @@ class RecentCommands(RhythiaCompat):
             cog = self.bot.get_cog("RecentCommands")
             resolver = getattr(cog, "_resolve_user_for_scores", None) if cog else None
             if resolver is None or not callable(resolver):
-                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str):
+                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str, lang: str = "en"):
                     if not query:
                         linked = self.bot.linked_accounts.get_account(d_id)
                         if not linked:
@@ -280,27 +277,32 @@ class RecentCommands(RhythiaCompat):
                     results = await c.search(query=query, limit=5)
                     users = results.get("users") or []
                     if not users:
-                        raise RhythiaAPIError(f"No player found for {query}.")
+                        raise RhythiaAPIError(translate("not_found", lang, query=query))
                     exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
                     if len(users) > 1 and exact is None:
-                        raise RhythiaAPIError(f"Multiple players found for {query}. Use a more exact username.")
+                        raise RhythiaAPIError(translate("multiple_found", lang, query=query))
                     user = exact or users[0]
                     return int(user["id"]), str(user.get("username") or query)
                 resolver = _inline_resolve
-            user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
+            try:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query, lang=lang)
+            except TypeError:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
             if user_id is None:
-                await interaction.followup.send("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                await interaction.followup.send(translate("link_first", lang), ephemeral=True)
                 return
 
             scores_data = await client.get_user_scores(user_id=user_id)
             top_scores = scores_data.get("top") or []
             if not top_scores:
-                await interaction.followup.send(f"**{target_name}** has no top scores.", ephemeral=True)
+                no_top_msg = translate("top_no_scores", lang, target_name=target_name)
+                await interaction.followup.send(no_top_msg, ephemeral=True)
                 return
 
             top_5 = top_scores[:5]
 
-            # Fetch stars via beatmapHash in parallel
             async def _fetch_stars(score_item: dict[str, Any]) -> float | None:
                 h = score_item.get("beatmapHash")
                 if not h:
@@ -314,7 +316,6 @@ class RecentCommands(RhythiaCompat):
             stars_tasks = [_fetch_stars(s) for s in top_5]
             stars_results = await asyncio.gather(*stars_tasks)
 
-            # Fetch profile to get player avatar
             avatar_url = None
             try:
                 profile_data = await client.get_profile(user_id=int(user_id))
@@ -325,8 +326,9 @@ class RecentCommands(RhythiaCompat):
             except Exception:
                 pass
 
+            title_text = translate("top_title", lang, target_name=target_name)
             embed = discord.Embed(
-                title=f"🏆 {target_name}'s Top 5 Scores",
+                title=title_text,
                 color=0x8B5CF6,
                 url=user_profile_url(user_id) if user_id else None
             )
@@ -335,56 +337,57 @@ class RecentCommands(RhythiaCompat):
 
             for index, (score, stars) in enumerate(zip(top_5, stars_results), start=1):
                 title = score.get("beatmapTitle") or score.get("songId") or "Unknown beatmap"
-                awarded = score.get("awarded_sp")
-                misses = score.get("misses")
+                awarded = score.get("awarded_sp") or 0.0
+                misses = score.get("misses") or 0
                 speed = score.get("speed")
                 spin = score.get("spin")
                 
                 diff_text = f"{stars:.2f}★" if isinstance(stars, (int, float)) else "—"
-                mode = "Spin" if spin else "Classic"
+                mode = translate("score_spin" if spin else "score_classic", lang)
                 speed_text = f"{speed:.2f}x" if isinstance(speed, (int, float)) else "1.00x"
                 
                 score_id = score.get("id") or "—"
                 
+                miss_label = translate("score_misses", lang)
+                value_fmt = translate("top_score_value", lang, awarded=awarded, diff_text=diff_text, miss_label=miss_label, misses=misses, mode=mode, speed_text=speed_text, score_id=score_id)
                 embed.add_field(
                     name=f"{index}. {title}",
-                    value=f"🏆 **{awarded:,.0f} SP** | {diff_text} | Misses: {misses} | {mode} ({speed_text}) | ID: `{score_id}`",
+                    value=value_fmt,
                     inline=False
                 )
 
             await interaction.followup.send(embed=embed)
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        except Exception:
             logger.exception("Unexpected error in /gerhythia top")
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
     @rhythia.command(name="compare", description="Compare stats of two players side by side")
     @app_commands.checks.cooldown(5, 30.0)
     @app_commands.describe(user1="First player name", user2="Second player name")
     async def compare(self, interaction: discord.Interaction, user1: str, user2: str) -> None:
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
         await interaction.response.defer(thinking=True)
         client = self.bot.client_for()
 
         try:
-            # Helper to search and resolve exactly one user
             async def resolve_exact(query: str):
                 results = await client.search(query=query.strip(), limit=5)
                 users = results.get("users") or []
                 if not users:
-                    raise RhythiaAPIError(f"Player '{query}' not found.")
+                    raise RhythiaAPIError(translate("not_found", lang, query=query))
                 exact = next((u for u in users if (u.get("username") or "").lower() == query.strip().lower()), None)
                 if len(users) > 1 and exact is None:
-                    raise RhythiaAPIError(f"Multiple players found for '{query}'. Use a more exact name.")
+                    raise RhythiaAPIError(translate("multiple_found", lang, query=query))
                 return exact or users[0]
 
-            # Fetch both in parallel
             u1_summary, u2_summary = await asyncio.gather(
                 resolve_exact(user1),
                 resolve_exact(user2)
             )
 
-            # Fetch detailed profiles to get all required stats
             p1_data, p2_data = await asyncio.gather(
                 client.get_profile(user_id=int(u1_summary["id"])),
                 client.get_profile(user_id=int(u2_summary["id"]))
@@ -393,7 +396,6 @@ class RecentCommands(RhythiaCompat):
             usr1 = p1_data.get("user") or {}
             usr2 = p2_data.get("user") or {}
 
-            # Helper for flag emojis
             from rhythia.discord_embeds import flag_emoji
             flag1 = flag_emoji(usr1.get("flag"))
             flag2 = flag_emoji(usr2.get("flag"))
@@ -401,7 +403,6 @@ class RecentCommands(RhythiaCompat):
             name1 = usr1.get("username", "User 1")
             name2 = usr2.get("username", "User 2")
 
-            # Determine leaders for visual highlight
             sp1, sp2 = usr1.get("skill_points") or 0.0, usr2.get("skill_points") or 0.0
             pos1, pos2 = usr1.get("position") or 999999, usr2.get("position") or 999999
             pc1, pc2 = usr1.get("play_count") or 0, usr2.get("play_count") or 0
@@ -412,20 +413,20 @@ class RecentCommands(RhythiaCompat):
             sp_leader1 = crown1 if sp1 > sp2 else ""
             sp_leader2 = crown2 if sp2 > sp1 else ""
             
-            # Position is better if lower (closer to #1)
             pos_leader1 = crown1 if pos1 < pos2 else ""
             pos_leader2 = crown2 if pos2 < pos1 else ""
             
             pc_leader1 = crown1 if pc1 > pc2 else ""
             pc_leader2 = crown2 if pc2 > pc1 else ""
 
+            comp_title = translate("compare_title", lang)
+            comp_desc = translate("compare_desc", lang, flag1=flag1, name1=name1, flag2=flag2, name2=name2)
             embed = discord.Embed(
-                title="⚔️ Player Comparison",
+                title=comp_title,
                 color=0x3B82F6,
-                description=f"Comparing stats between **{flag1} {name1}** and **{flag2} {name2}**"
+                description=comp_desc
             )
 
-            # Set thumbnail to the leader's (highest SP) avatar
             from rhythia.discord_embeds import _asset_url
             leader_user = usr1 if sp1 >= sp2 else usr2
             avatar = leader_user.get("avatar_url") or leader_user.get("profile_image")
@@ -434,22 +435,21 @@ class RecentCommands(RhythiaCompat):
                 embed.set_thumbnail(url=avatar_url)
 
             embed.add_field(
-                name="🏆 RP",
+                name=translate("profile_rp", lang),
                 value=f"**{name1}**: {sp_leader1}{sp1:,.2f} SP\n**{name2}**: {sp_leader2}{sp2:,.2f} SP",
                 inline=True
             )
             embed.add_field(
-                name="🌍 Global Rank",
+                name=translate("profile_global", lang),
                 value=f"**{name1}**: {pos_leader1}#{pos1:,}\n**{name2}**: {pos_leader2}#{pos2:,}",
                 inline=True
             )
             embed.add_field(
-                name="🎮 Play Count",
+                name=translate("profile_plays", lang),
                 value=f"**{name1}**: {pc_leader1}{pc1:,}\n**{name2}**: {pc_leader2}{pc2:,}",
                 inline=True
             )
 
-            # SP Diff
             sp_diff = sp1 - sp2
             diff_prefix = "+" if sp_diff > 0 else ""
             embed.add_field(
@@ -457,25 +457,28 @@ class RecentCommands(RhythiaCompat):
                 value=f"**{name1}** - **{name2}**: {diff_prefix}{sp_diff:,.2f}",
                 inline=True
             )
-            # Add extra detail cards
+            
+            online_str1 = translate("profile_online" if usr1.get('is_online') else "profile_offline", lang)
+            online_str2 = translate("profile_online" if usr2.get('is_online') else "profile_offline", lang)
             embed.add_field(
                 name=f"{flag1} {name1}",
-                value=f"• **Status:** {'🟢 Online' if usr1.get('is_online') else '⚫ Offline'}",
+                value=f"• **Status:** {online_str1}",
                 inline=True
             )
             embed.add_field(
                 name=f"{flag2} {name2}",
-                value=f"• **Status:** {'🟢 Online' if usr2.get('is_online') else '⚫ Offline'}",
+                value=f"• **Status:** {online_str2}",
                 inline=True
             )
 
-            embed.set_footer(text="rhythia.com · 👑 indicates the leader in each stat")
+            footer_text = translate("compare_footer", lang)
+            embed.set_footer(text=footer_text)
             await interaction.followup.send(embed=embed)
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        except Exception:
             logger.exception("Unexpected error in /gerhythia compare")
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
     @rhythia.command(name="today", description="Show a player's activity and best score today")
     @app_commands.checks.cooldown(5, 30.0)
@@ -483,6 +486,8 @@ class RecentCommands(RhythiaCompat):
     async def today(self, interaction: discord.Interaction, username: str | None = None) -> None:
         if interaction.user is None:
             return
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
         await interaction.response.defer(thinking=True)
         client = self.bot.client_for()
         query = (username or "").strip()
@@ -491,7 +496,7 @@ class RecentCommands(RhythiaCompat):
             cog = self.bot.get_cog("RecentCommands")
             resolver = getattr(cog, "_resolve_user_for_scores", None) if cog else None
             if resolver is None or not callable(resolver):
-                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str):
+                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str, lang: str = "en"):
                     if not query:
                         linked = self.bot.linked_accounts.get_account(d_id)
                         if not linked:
@@ -500,32 +505,36 @@ class RecentCommands(RhythiaCompat):
                     results = await c.search(query=query, limit=5)
                     users = results.get("users") or []
                     if not users:
-                        raise RhythiaAPIError(f"No player found for {query}.")
+                        raise RhythiaAPIError(translate("not_found", lang, query=query))
                     exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
                     if len(users) > 1 and exact is None:
-                        raise RhythiaAPIError(f"Multiple players found for {query}. Use a more exact username.")
+                        raise RhythiaAPIError(translate("multiple_found", lang, query=query))
                     user = exact or users[0]
                     return int(user["id"]), str(user.get("username") or query)
                 resolver = _inline_resolve
-            user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
+            try:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query, lang=lang)
+            except TypeError:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
             if user_id is None:
-                await interaction.followup.send("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                await interaction.followup.send(translate("link_first", lang), ephemeral=True)
                 return
 
             scores_data = await client.get_user_scores(user_id=user_id)
             recent_scores = scores_data.get("lastDay") or []
             
             if not recent_scores:
-                await interaction.followup.send(f"**{target_name}** has no scores recorded today.", ephemeral=True)
+                no_scores_today = translate("today_no_scores", lang, target_name=target_name)
+                await interaction.followup.send(no_scores_today, ephemeral=True)
                 return
 
             total_scores = len(recent_scores)
             passed_scores = sum(1 for s in recent_scores if s.get("passed"))
             
-            # Find the best score based on awarded_sp
             best_score = max(recent_scores, key=lambda s: s.get("awarded_sp") or 0)
 
-            # Fetch profile to get player avatar
             avatar_url = None
             try:
                 profile_data = await client.get_profile(user_id=int(user_id))
@@ -536,34 +545,36 @@ class RecentCommands(RhythiaCompat):
             except Exception:
                 pass
 
+            today_title = translate("today_title", lang, target_name=target_name)
             embed = discord.Embed(
-                title=f"📅 Today's Activity for {target_name}",
+                title=today_title,
                 color=0x10B981,
                 url=user_profile_url(user_id) if user_id else None
             )
             if avatar_url:
                 embed.set_thumbnail(url=avatar_url)
             
-            embed.add_field(name="Total Plays", value=f"**{total_scores}** ({passed_scores} passed)", inline=True)
+            plays_value = translate("today_plays_value", lang, total_scores=total_scores, passed_scores=passed_scores)
+            embed.add_field(name=translate("profile_plays", lang), value=plays_value, inline=True)
             
             best_title = best_score.get("beatmapTitle") or best_score.get("songId") or "Unknown beatmap"
             best_sp = best_score.get("awarded_sp") or 0
             best_stars = best_score.get("beatmapDifficulty") or best_score.get("difficulty")
             best_stars_text = f"{best_stars:.2f}★" if isinstance(best_stars, (int, float)) else "—"
             
+            best_play_name = translate("today_best_play_name", lang)
             embed.add_field(
-                name="⭐ Best Play Today",
+                name=best_play_name,
                 value=f"**{best_title}**\n🏆 **{best_sp:,.0f} SP** | {best_stars_text}",
                 inline=False
             )
 
             await interaction.followup.send(embed=embed)
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        except Exception:
             logger.exception("Unexpected error in /gerhythia today")
-            await interaction.followup.send("Internal error.", ephemeral=True)
-
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
     @rhythia.command(name="scores", description="Show a player's recent score history (paginated)")
     @app_commands.checks.cooldown(5, 30.0)
@@ -571,6 +582,8 @@ class RecentCommands(RhythiaCompat):
     async def scores(self, interaction: discord.Interaction, username: str | None = None) -> None:
         if interaction.user is None:
             return
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
         await interaction.response.defer(thinking=True)
         client = self.bot.client_for()
         query = (username or "").strip()
@@ -579,7 +592,7 @@ class RecentCommands(RhythiaCompat):
             cog = self.bot.get_cog("RecentCommands")
             resolver = getattr(cog, "_resolve_user_for_scores", None) if cog else None
             if resolver is None or not callable(resolver):
-                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str):
+                async def _inline_resolve(d_id: int, c: RhythiaClient, *, query: str, lang: str = "en"):
                     if not query:
                         linked = self.bot.linked_accounts.get_account(d_id)
                         if not linked:
@@ -588,26 +601,31 @@ class RecentCommands(RhythiaCompat):
                     results = await c.search(query=query, limit=5)
                     users = results.get("users") or []
                     if not users:
-                        raise RhythiaAPIError(f"No player found for {query}.")
+                        raise RhythiaAPIError(translate("not_found", lang, query=query))
                     exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
                     if len(users) > 1 and exact is None:
-                        raise RhythiaAPIError(f"Multiple players found for {query}. Use a more exact username.")
+                        raise RhythiaAPIError(translate("multiple_found", lang, query=query))
                     user = exact or users[0]
                     return int(user["id"]), str(user.get("username") or query)
                 resolver = _inline_resolve
-            user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
+            try:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query, lang=lang)
+            except TypeError:
+                user_id, target_name = await resolver(interaction.user.id, client, query=query)
+
             if user_id is None:
-                await interaction.followup.send("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                await interaction.followup.send(translate("link_first", lang), ephemeral=True)
                 return
 
             scores_data = await client.get_user_scores(user_id=user_id)
             all_scores = _sorted_scores_by_created_at(scores_data.get("lastDay") or [])
 
             if not all_scores:
-                await interaction.followup.send(f"**{target_name}** has no recent public scores.", ephemeral=True)
+                no_scores_msg = translate("recent_no_scores", lang, target_name=target_name)
+                await interaction.followup.send(no_scores_msg, ephemeral=True)
                 return
 
-            # Fetch avatar
             avatar_url = None
             try:
                 profile_data = await client.get_profile(user_id=int(user_id))
@@ -618,7 +636,6 @@ class RecentCommands(RhythiaCompat):
             except Exception:
                 pass
 
-            # Prefetch stars for all unique beatmap hashes in parallel
             unique_hashes = list({s.get("beatmapHash") for s in all_scores if s.get("beatmapHash")})
             hash_to_stars: dict[str, float | None] = {}
             
@@ -635,8 +652,9 @@ class RecentCommands(RhythiaCompat):
             PAGE_SIZE = 5
 
             def build_page(page_items: list[Any], page: int, max_pages: int) -> discord.Embed:
+                title_text = translate("scores_title", lang, target_name=target_name)
                 embed = discord.Embed(
-                    title=f"📋 {target_name}'s Recent Scores",
+                    title=title_text,
                     color=0xF97316,
                     url=user_profile_url(user_id) if user_id else None,
                 )
@@ -661,9 +679,8 @@ class RecentCommands(RhythiaCompat):
                     stars_text = f"{stars:.2f}★" if isinstance(stars, (int, float)) else "—"
                     speed_text = f"{float(speed):.2f}x" if isinstance(speed, (int, float)) else "—"
                     result_icon = "✅" if passed else "❌"
-                    mode = "🌀 Spin" if spin else "🎯 Classic"
+                    mode = translate("score_spin" if spin else "score_classic", lang)
 
-                    # Format timestamp as short date/time
                     try:
                         from datetime import datetime
                         ts = datetime.fromisoformat(created.replace("Z", "+00:00"))
@@ -671,13 +688,15 @@ class RecentCommands(RhythiaCompat):
                     except Exception:
                         time_str = created[:16].replace("T", " ") if created else "—"
 
+                    miss_label = translate("score_misses", lang)
                     embed.add_field(
                         name=f"{result_icon} {score_title}",
-                        value=f"🏆 **{sp:,.0f} SP** | {stars_text} | Misses: {misses} | {speed_text} | {mode} | `{time_str}` | ID: `{score.get('id') or '—'}`",
+                        value=f"🏆 **{sp:,.0f} SP** | {stars_text} | {miss_label}: {misses} | {speed_text} | {mode} | `{time_str}` | ID: `{score.get('id') or '—'}`",
                         inline=False,
                     )
 
-                embed.set_footer(text=f"Page {page}/{max_pages} · {len(all_scores)} scores today · rhythia.com")
+                footer_text = translate("scores_footer", lang, page=page, max_pages=max_pages, count=len(all_scores))
+                embed.set_footer(text=footer_text)
                 return embed
 
             from bot.embed_navigator import LocalEmbedNavigatorView
@@ -688,12 +707,14 @@ class RecentCommands(RhythiaCompat):
             await interaction.followup.send(embed=embed, view=view)
 
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        except Exception:
             logger.exception("Unexpected error in /gerhythia scores")
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
-    async def _resolve_user_for_scores(self, discord_id: int, client: RhythiaClient, *, query: str) -> tuple[int | None, str]:
+    async def _resolve_user_for_scores(self, discord_id: int, client: RhythiaClient, *, query: str, lang: str = "en") -> tuple[int | None, str]:
+        from utils.i18n import translate
+
         if not query:
             linked = self.bot.linked_accounts.get_account(discord_id)
             if not linked:
@@ -703,35 +724,9 @@ class RecentCommands(RhythiaCompat):
         results = await client.search(query=query, limit=5)
         users = results.get("users") or []
         if not users:
-            raise RhythiaAPIError(f"No player found for {query}.")
+            raise RhythiaAPIError(translate("not_found", lang, query=query))
         exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
         if len(users) > 1 and exact is None:
-            raise RhythiaAPIError(f"Multiple players found for {query}. Use a more exact username.")
+            raise RhythiaAPIError(translate("multiple_found", lang, query=query))
         user = exact or users[0]
         return int(user["id"]), str(user.get("username") or query)
-
-    async def _reply_with_navigable_embed(self, interaction: discord.Interaction, *, fetch: Callable[[RhythiaClient, int], Awaitable[dict[str, Any]]], build: Callable[[dict[str, Any], int], discord.Embed], initial_user_page: int = 1, page_size: int | None = None) -> None:
-        from bot.embed_navigator import API_PAGE_SIZE, EmbedNavigatorView
-        if interaction.user is None:
-            return
-        client = self.bot.client_for()
-        if not interaction.response.is_done():
-            try:
-                await interaction.response.defer(thinking=True)
-            except discord.NotFound:
-                return
-        try:
-            actual_page_size = page_size or API_PAGE_SIZE
-            first_item_index = (initial_user_page - 1) * actual_page_size
-            api_page = (first_item_index // 50) + 1
-            data = await fetch(client, api_page)
-            total = data.get("total", 0)
-            per_page = actual_page_size
-            max_pages = (total + per_page - 1) // per_page if total > 0 else 1
-            embed = build(data, initial_user_page)
-            view = EmbedNavigatorView(interaction, fetch=fetch, build=build, initial_data=data, initial_user_page=initial_user_page, max_pages=max_pages, page_size=page_size)
-            await interaction.followup.send(embed=embed, view=view)
-        except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception as exc:
-            await interaction.followup.send("Internal error.", ephemeral=True)

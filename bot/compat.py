@@ -12,6 +12,7 @@ from rhythia.api_errors import RhythiaAPIError
 from utils.helpers import country_autocomplete
 
 logger = logging.getLogger(__name__)
+from utils.i18n import translate
 
 
 class RhythiaCompat(commands.Cog):
@@ -19,6 +20,11 @@ class RhythiaCompat(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    def _get_lang(self, interaction: discord.Interaction) -> str:
+        if interaction.guild_id and hasattr(self.bot, "linked_accounts"):
+            return self.bot.linked_accounts.get_guild_language(interaction.guild_id)
+        return "en"
 
     async def _reply_with_embed(
         self,
@@ -31,6 +37,7 @@ class RhythiaCompat(commands.Cog):
             return
 
         client = self.bot.client_for()
+        lang = self._get_lang(interaction)
 
         if not interaction.response.is_done():
             try:
@@ -40,11 +47,17 @@ class RhythiaCompat(commands.Cog):
 
         try:
             data = await fetch(client)
-            await interaction.followup.send(embed=build(data))
+            try:
+                embed = build(data, lang=lang)
+            except TypeError:
+                embed = build(data)
+            await interaction.followup.send(embed=embed)
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+            logger.warning("Rhythia API error in command %s: %s", interaction.command.name if interaction.command else "unknown", exc)
+            await interaction.followup.send(translate("api_error", lang), ephemeral=True)
         except Exception:
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            logger.exception("Unexpected error in command %s", interaction.command.name if interaction.command else "unknown")
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
     async def _reply_with_navigable_embed(
         self,
@@ -59,6 +72,7 @@ class RhythiaCompat(commands.Cog):
             return
 
         client = self.bot.client_for()
+        lang = self._get_lang(interaction)
 
         if not interaction.response.is_done():
             try:
@@ -78,7 +92,10 @@ class RhythiaCompat(commands.Cog):
             per_page = actual_page_size
             max_pages = (total + per_page - 1) // per_page if total > 0 else 1
 
-            embed = build(data, initial_user_page)
+            try:
+                embed = build(data, initial_user_page, lang=lang)
+            except TypeError:
+                embed = build(data, initial_user_page)
             view = EmbedNavigatorView(
                 interaction,
                 fetch=fetch,
@@ -90,18 +107,21 @@ class RhythiaCompat(commands.Cog):
             )
             await interaction.followup.send(embed=embed, view=view)
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+            logger.warning("Rhythia API error in command %s: %s", interaction.command.name if interaction.command else "unknown", exc)
+            await interaction.followup.send(translate("api_error", lang), ephemeral=True)
         except Exception:
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            logger.exception("Unexpected error in command %s", interaction.command.name if interaction.command else "unknown")
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
     async def cog_app_command_error(
         self,
         interaction: discord.Interaction,
         error: app_commands.AppCommandError,
     ) -> None:
+        lang = self._get_lang(interaction)
+
         if isinstance(error, app_commands.CommandOnCooldown):
-            retry_after = max(1, round(error.retry_after))
-            message = f"Slow down a bit. Try again in **{retry_after}s**."
+            message = translate("cooldown", lang, time=error.retry_after)
             try:
                 if interaction.response.is_done():
                     await interaction.followup.send(message, ephemeral=True)
@@ -115,10 +135,29 @@ class RhythiaCompat(commands.Cog):
                     pass
             return
 
-        cmd_name = interaction.command.name if interaction.command else "unknown"
-        logger.error(f"Error running command {cmd_name}: {error}", exc_info=error)
+        if isinstance(error, app_commands.errors.MissingPermissions):
+            message = translate("admin_required", lang)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(message, ephemeral=True)
+                else:
+                    await interaction.response.send_message(message, ephemeral=True)
+            except Exception:
+                pass
+            return
 
-        message = "Internal error."
+        cmd_name = interaction.command.name if interaction.command else "unknown"
+        original_error = getattr(error, "original", error)
+
+        # Handle specific RhythiaAPIError if raised unhandled
+        from rhythia.api_errors import RhythiaAPIError
+        if isinstance(original_error, RhythiaAPIError):
+            logger.warning("Rhythia API error in command %s: %s", cmd_name, original_error)
+            message = translate("api_error", lang)
+        else:
+            logger.error(f"Error running command {cmd_name}: {original_error}", exc_info=original_error)
+            message = translate("internal_error", lang)
+
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(message, ephemeral=True)

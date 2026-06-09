@@ -31,6 +31,76 @@ class RhythiaBot(commands.Bot):
         self._stats_cache: dict[str, int] = {}
         self._stats_updated: datetime | None = None
         self._http_session: aiohttp.ClientSession | None = None
+        self.tree.on_error = self.on_app_command_error
+
+    async def on_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: discord.app_commands.AppCommandError,
+    ) -> None:
+        """Handle app command errors globally to prevent error leaking to users."""
+        from utils.i18n import translate
+        lang = "en"
+        if interaction.guild_id and hasattr(self, "linked_accounts"):
+            lang = self.linked_accounts.get_guild_language(interaction.guild_id)
+
+        # Determine the response channel (followup if deferred/sent, otherwise direct response)
+        if interaction.response.is_done():
+            send_func = lambda content, **kwargs: interaction.followup.send(content, **kwargs)
+        else:
+            send_func = lambda content, **kwargs: interaction.response.send_message(content, **kwargs)
+
+        if isinstance(error, discord.app_commands.errors.CommandOnCooldown):
+            try:
+                await send_func(
+                    translate("cooldown", lang, time=error.retry_after),
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+            return
+
+        if isinstance(error, discord.app_commands.errors.MissingPermissions):
+            try:
+                await send_func(
+                    translate("admin_required", lang),
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+            return
+
+        # Extract the original unhandled exception if wrapped
+        original_error = getattr(error, "original", error)
+
+        # Handle Rhythia API Errors gracefully
+        from rhythia.api_errors import RhythiaAPIError
+        if isinstance(original_error, RhythiaAPIError):
+            logger.warning("Rhythia API error in command %s: %s", interaction.command.name if interaction.command else "unknown", original_error)
+            try:
+                await send_func(
+                    translate("api_error", lang),
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+            return
+
+        # Log details internally for all other unhandled exceptions
+        logger.exception(
+            "Unhandled error in command %s",
+            interaction.command.name if interaction.command else "unknown",
+            exc_info=original_error,
+        )
+
+        # Send a generic error message to the user
+        try:
+            await send_func(
+                translate("internal_error", lang),
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
     async def setup_hook(self) -> None:
         # Create shared HTTP session for connection reuse
@@ -47,6 +117,7 @@ class RhythiaBot(commands.Bot):
         from commands.leaderboard_commands import LeaderboardCommands
         from commands.recent_commands import RecentCommands
         from commands.misc_commands import MiscCommands
+        from commands.language_commands import LanguageCommands
 
         # Register a single compatibility Cog that defines the shared `gerhythia`
         # app command group. Per-category cogs attach subcommands to this group
@@ -65,6 +136,7 @@ class RhythiaBot(commands.Bot):
             LeaderboardCommands,
             RecentCommands,
             MiscCommands,
+            LanguageCommands,
         ):
             try:
                 await self.add_cog(cog_cls(self))

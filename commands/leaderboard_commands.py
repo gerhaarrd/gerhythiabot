@@ -113,10 +113,13 @@ class LeaderboardCommands(RhythiaCompat):
 
         try:
             # Resolve target user id & username
+            from utils.i18n import translate
+            lang = self._get_lang(interaction)
+
             if not query:
                 linked = self.bot.linked_accounts.get_account(interaction.user.id)
                 if not linked:
-                    await interaction.followup.send("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                    await interaction.followup.send(translate("link_first", lang), ephemeral=True)
                     return
                 user_id = linked.rhythia_user_id
                 target_name = linked.rhythia_username
@@ -124,11 +127,11 @@ class LeaderboardCommands(RhythiaCompat):
                 results = await client.search(query=query, limit=5)
                 users = results.get("users") or []
                 if not users:
-                    await interaction.followup.send(f"No player found for {query}.", ephemeral=True)
+                    await interaction.followup.send(translate("not_found", lang, query=query), ephemeral=True)
                     return
                 exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
                 if len(users) > 1 and exact is None:
-                    await interaction.followup.send(f"Multiple players found for {query}. Use a more exact username.", ephemeral=True)
+                    await interaction.followup.send(translate("multiple_found", lang, query=query), ephemeral=True)
                     return
                 user = exact or users[0]
                 user_id = int(user["id"])
@@ -139,17 +142,17 @@ class LeaderboardCommands(RhythiaCompat):
             user_data = profile.get("user", {})
             position = user_data.get("position")
             if position is None:
-                await interaction.followup.send(f"Player **{target_name}** has no rank position.", ephemeral=True)
+                await interaction.followup.send(translate("nearby_no_position", lang, target_name=target_name), ephemeral=True)
                 return
 
             try:
                 pos_int = int(position)
             except (TypeError, ValueError):
-                await interaction.followup.send(f"Player **{target_name}** has an invalid rank position.", ephemeral=True)
+                await interaction.followup.send(translate("nearby_invalid_position", lang, target_name=target_name), ephemeral=True)
                 return
 
             if pos_int <= 0:
-                await interaction.followup.send(f"Player **{target_name}** is unranked.", ephemeral=True)
+                await interaction.followup.send(translate("nearby_unranked", lang, target_name=target_name), ephemeral=True)
                 return
 
             # Center 10 players around pos_int
@@ -203,20 +206,20 @@ class LeaderboardCommands(RhythiaCompat):
             
             spin_label = " (Spin)" if spin else ""
             embed = discord.Embed(
-                title=f"👥 Players Nearby {target_name}{spin_label}",
-                description="\n".join(lines) if lines else "_No players nearby found._",
+                title=translate("nearby_title", lang, target_name=target_name, spin_label=spin_label),
+                description="\n".join(lines) if lines else translate("nearby_no_players", lang),
                 color=EMBED_COLOR_LEADERBOARD
             )
-            embed.set_footer(text=f"Centered around rank #{pos_int:,}")
+            embed.set_footer(text=translate("nearby_footer", lang, pos_int=pos_int))
             await interaction.followup.send(embed=embed)
             
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+            await interaction.followup.send(translate("api_error", lang), ephemeral=True)
         except Exception:
             logger.exception("Unexpected error in /gerhythia nearby")
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)
 
-    @rhythia.command(name="milestone", description="Show competitive milestones and SP/ranks needed")
+    @rhythia.command(name="milestone", description="Show competitive milestones and RP/ranks needed")
     @app_commands.checks.cooldown(5, 30.0)
     @app_commands.describe(username="Player name (empty = linked account)")
     async def milestone(self, interaction: discord.Interaction, username: str | None = None) -> None:
@@ -229,10 +232,13 @@ class LeaderboardCommands(RhythiaCompat):
 
         try:
             # Resolve target user
+            from utils.i18n import translate
+            lang = self._get_lang(interaction)
+
             if not query:
                 linked = self.bot.linked_accounts.get_account(interaction.user.id)
                 if not linked:
-                    await interaction.followup.send("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                    await interaction.followup.send(translate("link_first", lang), ephemeral=True)
                     return
                 user_id = linked.rhythia_user_id
                 target_name = linked.rhythia_username
@@ -240,11 +246,11 @@ class LeaderboardCommands(RhythiaCompat):
                 results = await client.search(query=query, limit=5)
                 users = results.get("users") or []
                 if not users:
-                    await interaction.followup.send(f"No player found for {query}.", ephemeral=True)
+                    await interaction.followup.send(translate("not_found", lang, query=query), ephemeral=True)
                     return
                 exact = next((u for u in users if (u.get("username") or "").lower() == query.lower()), None)
                 if len(users) > 1 and exact is None:
-                    await interaction.followup.send(f"Multiple players found for {query}. Use a more exact username.", ephemeral=True)
+                    await interaction.followup.send(translate("multiple_found", lang, query=query), ephemeral=True)
                     return
                 user = exact or users[0]
                 user_id = int(user["id"])
@@ -297,50 +303,46 @@ class LeaderboardCommands(RhythiaCompat):
 
             from rhythia.discord_embeds import EMBED_COLOR_PROFILE
             embed = discord.Embed(
-                title=f"🎯 Milestone Progress for {target_name}",
+                title=translate("milestone_title", lang, target_name=target_name),
                 color=EMBED_COLOR_PROFILE
             )
             
             sp_text = (
-                f"• **{sp_100_target:,} RP** Milestone: needs **+{sp_100_diff:.2f} SP**\n"
-                f"• **{sp_500_target:,} RP** Milestone: needs **+{sp_500_diff:.2f} SP**\n"
-                f"• **{sp_1000_target:,} RP** Milestone: needs **+{sp_1000_diff:.2f} SP**"
+                translate("milestone_rp", lang, target=f"{sp_100_target:,}", diff=sp_100_diff) + "\n" +
+                translate("milestone_rp", lang, target=f"{sp_500_target:,}", diff=sp_500_diff) + "\n" +
+                translate("milestone_rp", lang, target=f"{sp_1000_target:,}", diff=sp_1000_diff)
             )
-            embed.add_field(name="✨ RP Milestones", value=sp_text, inline=False)
+            embed.add_field(name=translate("milestone_rp_title", lang), value=sp_text, inline=False)
 
             if pos_val > 0:
-                rank_milestone_title = f"🏆 Next Rank Milestone: Top {next_rank_target}"
+                rank_milestone_title = translate("milestone_rank_title", lang, next_rank_target=next_rank_target)
                 if next_rank_target == 1:
-                    rank_milestone_title = "🏆 Next Rank Milestone: Top 1 (Rank Leader)"
+                    rank_milestone_title = translate("milestone_rank_leader", lang)
                 
                 if next_rank_target is None:
-                    rank_text = "You are already rank #1! There are no higher rank milestones."
+                    rank_text = translate("milestone_rank_max", lang)
                 elif rank_threshold_sp is not None:
                     try:
                         thresh_val = float(rank_threshold_sp)
                         diff = thresh_val - sp_val
                         if diff <= 0:
-                            rank_text = f"You are currently rank **#{pos_val:,}**. Rank **#{next_rank_target:,}** has **{thresh_val:,.2f} SP** (you are very close!)."
+                            rank_text = translate("milestone_rank_close", lang, pos_val=pos_val, next_rank_target=next_rank_target, thresh_val=thresh_val)
                         else:
-                            rank_text = (
-                                f"• Current Rank: **#{pos_val:,}** ({sp_val:,.2f} SP)\n"
-                                f"• Target Rank: **#{next_rank_target:,}** ({thresh_val:,.2f} SP)\n"
-                                f"• SP needed: **+{diff:.2f} SP**"
-                            )
+                            rank_text = translate("milestone_rank_progress", lang, pos_val=pos_val, sp_val=sp_val, next_rank_target=next_rank_target, thresh_val=thresh_val, diff=diff)
                     except Exception:
-                        rank_text = f"Could not retrieve threshold SP for Rank **#{next_rank_target}**."
+                        rank_text = translate("milestone_rank_unavailable", lang, next_rank_target=next_rank_target)
                 else:
-                    rank_text = f"Current Rank: **#{pos_val:,}**. Next rank target is **#{next_rank_target}** (threshold SP unavailable)."
+                    rank_text = translate("milestone_rank_no_thresh", lang, pos_val=pos_val, next_rank_target=next_rank_target)
                 
                 embed.add_field(name=rank_milestone_title, value=rank_text, inline=False)
             else:
-                embed.add_field(name="🏆 Rank Milestone", value="Unranked player has no rank milestone.", inline=False)
+                embed.add_field(name=translate("milestone_rank_title", lang, next_rank_target=""), value=translate("milestone_rank_unranked", lang), inline=False)
 
             embed.set_footer(text="rhythia.com · Keep pushing!")
             await interaction.followup.send(embed=embed)
 
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
+            await interaction.followup.send(translate("api_error", lang), ephemeral=True)
         except Exception:
             logger.exception("Unexpected error in /gerhythia milestone")
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(translate("internal_error", lang), ephemeral=True)

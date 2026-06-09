@@ -109,6 +109,14 @@ class LinkedAccountStore:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS guild_settings (
+                guild_id TEXT PRIMARY KEY,
+                language TEXT NOT NULL DEFAULT 'en'
+            )
+            """
+        )
 
     def _migrate_token_optional(self) -> None:
         # Token storage removed; no migration needed.
@@ -318,3 +326,24 @@ class LinkedAccountStore:
     def count(self) -> int:
         row = self._get_conn().execute("SELECT COUNT(*) as count FROM links").fetchone()
         return row["count"] if row else 0
+
+    def get_guild_language(self, guild_id: int) -> str:
+        row = self._get_conn().execute(
+            "SELECT language FROM guild_settings WHERE guild_id = ?",
+            (str(guild_id),),
+        ).fetchone()
+        if row is None:
+            return "en"
+        return str(row["language"])
+
+    def set_guild_language(self, guild_id: int, language: str) -> None:
+        with self._lock:
+            self._get_conn().execute(
+                """
+                INSERT INTO guild_settings (guild_id, language)
+                VALUES (?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    language = excluded.language
+                """,
+                (str(guild_id), language),
+            )

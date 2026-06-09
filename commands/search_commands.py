@@ -25,9 +25,11 @@ class SearchCommands(RhythiaCompat):
     @app_commands.checks.cooldown(5, 30.0)
     @app_commands.describe(query="Player or beatmap name")
     async def search(self, interaction: discord.Interaction, query: app_commands.Range[str, 2, 64]) -> None:
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
         await interaction.response.defer(thinking=True)
         try:
             data = await public_search(query=query.strip(), limit=12)
-            await interaction.followup.send(embed=search_results_embed(data, query=query.strip()))
+            await interaction.followup.send(embed=search_results_embed(data, query=query.strip(), lang=lang))
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Search failed: {exc}", ephemeral=True)
+            await interaction.followup.send(translate("api_error", lang), ephemeral=True)

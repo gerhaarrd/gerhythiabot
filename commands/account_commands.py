@@ -42,11 +42,14 @@ class AccountCommands(RhythiaCompat):
         if interaction.user is None:
             return
 
+        from utils.i18n import translate
+        lang = self._get_lang(interaction)
+
         query = (username or "").strip()
         if not query:
             linked = self.bot.linked_accounts.get_account(interaction.user.id)
             if not linked or linked.rhythia_user_id is None:
-                await interaction.response.send_message("You need to link your Rhythia username first. Use `/gerhythia link <username>`.", ephemeral=True)
+                await interaction.response.send_message(translate("link_first", lang), ephemeral=True)
                 return
             await self._reply_with_embed(interaction, fetch=lambda c: c.get_profile(user_id=linked.rhythia_user_id), build=profile_embed)
             return
@@ -58,32 +61,12 @@ class AccountCommands(RhythiaCompat):
             results = await client.search(query=query, limit=5)
             users = results.get("users") or []
             if not users:
-                await interaction.followup.send(f"No player found for **{query}**.", ephemeral=True)
+                await interaction.followup.send(translate("not_found", lang, query=query), ephemeral=True)
                 return
             if len(users) > 1 and not _exact_username_match(users, query):
                 await interaction.followup.send(embed=search_results_embed(results, query=query))
                 return
             data = await client.get_profile(user_id=int(users[0]["id"]))
-            await interaction.followup.send(embed=profile_embed(data))
+            await interaction.followup.send(embed=profile_embed(data, lang=lang))
         except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-
-    async def _reply_with_embed(self, interaction: discord.Interaction, *, fetch: Callable[[RhythiaClient], Awaitable[dict[str, Any]]], build: Callable[[dict[str, Any]], discord.Embed]) -> None:
-        if interaction.user is None:
-            return
-
-        client = self.bot.client_for()
-
-        if not interaction.response.is_done():
-            try:
-                await interaction.response.defer(thinking=True)
-            except discord.NotFound:
-                return
-
-        try:
-            data = await fetch(client)
-            await interaction.followup.send(embed=build(data))
-        except RhythiaAPIError as exc:
-            await interaction.followup.send(f"Error: {exc}", ephemeral=True)
-        except Exception:
-            await interaction.followup.send("Internal error.", ephemeral=True)
+            await interaction.followup.send(translate("api_error", lang), ephemeral=True)
