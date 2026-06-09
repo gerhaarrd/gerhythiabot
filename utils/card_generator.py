@@ -112,8 +112,8 @@ def generate_profile_card(profile_data: dict[str, Any], avatar_bytes: bytes | No
 
     user = profile_data.get("user") or {}
     username = user.get("username") or user.get("computedUsername") or "Unknown"
-    clan = user.get("clan") or {}
-    clan_tag = f" [{clan['acronym']}]" if clan.get("acronym") else ""
+    clan = user.get("clan")
+    clan_tag = f" [{clan['acronym']}]" if isinstance(clan, dict) and clan.get("acronym") else ""
     
     # Glassmorphic Box with dual-tone neon highlight border
     draw.rounded_rectangle([250, 40, 520, 360], radius=15, fill=(15, 23, 42, 180))
