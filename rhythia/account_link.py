@@ -27,9 +27,24 @@ async def find_link_candidates(query: str, *, limit: int = 5) -> list[dict[str, 
     if len(text) < 2:
         raise AccountLinkError("Type at least 2 characters from your Rhythia username.")
 
+    if text.isdigit():
+        try:
+            async with RhythiaClient() as client:
+                data = await client.get_profile(user_id=int(text))
+            user = data.get("user")
+            if user and isinstance(user, dict):
+                return [user]
+        except Exception:
+            pass
+
     try:
         results = await public_search(query=text, limit=limit)
     except RhythiaAPIError as exc:
+        if "57014" in str(exc) or "timeout" in str(exc).lower():
+            raise AccountLinkError(
+                "Rhythia search timed out due to database load. "
+                "Please try again later, or link directly using your numeric Rhythia User ID (e.g., `/gerhythia link 12345`)."
+            ) from exc
         raise AccountLinkError(f"Rhythia search failed: {exc}") from exc
 
     users = results.get("users") or []

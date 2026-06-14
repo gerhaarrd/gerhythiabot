@@ -133,8 +133,19 @@ class RhythiaClient:
             else:
                 del self._beatmap_cache[key]
         # First try the public search (enhancedSearch) which is fast for titles
-        results = await self.search(query=query.strip(), limit=10)
-        beatmaps = results.get("beatmaps") or []
+        try:
+            results = await self.search(query=query.strip(), limit=10)
+            beatmaps = results.get("beatmaps") or []
+        except Exception:
+            beatmaps = []
+
+        if not isinstance(beatmaps, list) or not beatmaps:
+            try:
+                beatmaps_page = await self.get_beatmaps(page=1, query=query.strip())
+                beatmaps = beatmaps_page.get("beatmaps") or []
+            except Exception:
+                return None
+
         if not isinstance(beatmaps, list) or not beatmaps:
             return None
 
