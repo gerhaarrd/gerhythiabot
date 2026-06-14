@@ -29,7 +29,10 @@ async def main() -> None:
 
     @bot.event
     async def on_ready() -> None:
-        pass
+        logger.info(f"Logged in as {bot.user} (ID: {bot.user.id if bot.user else 'Unknown'})")
+        logger.info(f"Connected to {len(bot.guilds)} servers:")
+        for guild in bot.guilds:
+            logger.info(f" - {guild.name} (ID: {guild.id})")
 
     async with bot:
         await bot.start(settings.discord_token)
